@@ -49,6 +49,20 @@ const views = {
   'trappist-1-orbits': `focus=TRAPPIST-1&t=${T}&exoplanets=1&dist=25000000&pitch=0.5`,
   'galactic-centre': `focus=Earth&t=${T}&dist=400000&sky=266.4,-28.9&fov=100`,
   'sun-from-500pc': `focus=Sun&t=${T}&dist=1.5e16&pitch=0.15&fov=80`,
+  // Milestone 5: the Milky Way and beyond.
+  'milky-way': `focus=Milky%20Way&t=${T}`,
+  'milky-way-edge': `focus=Milky%20Way&t=${T}&pitch=0.05`,
+  'andromeda-from-earth': `focus=Earth&t=${T}&dist=400000&sky=10.68,41.27&fov=6`,
+  'andromeda': `focus=Andromeda%20Galaxy&t=${T}`,
+  'local-group': `focus=Local%20Group&t=${T}`,
+  'lg-test': `focus=Local%20Group&t=${T}&dist=4e19&fov=60`,
+  'orion-nebula': `focus=Orion%20Nebula&t=${T}`,
+  'orion-from-earth': `focus=Earth&t=${T}&dist=400000&sky=83.8,-5.4&fov=12`,
+  'whirlpool': `focus=Whirlpool%20Galaxy&t=${T}`,
+  'virgo-cluster': `focus=Virgo%20Cluster&t=${T}`,
+  'cosmic-web': `focus=Milky%20Way&t=${T}&dist=2e22&pitch=0.5`,
+  'microwave-sky': `focus=Earth&t=${T}&dist=400000&sky=266.4,-28.9&fov=120&cmb=1`,
+  'observable-universe': `focus=Milky%20Way&t=${T}&dist=1e24&pitch=0.3`,
 };
 const only = process.argv[3]?.split(',');
 

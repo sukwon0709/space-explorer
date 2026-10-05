@@ -1,0 +1,13 @@
+{
+  "note": "Independent distances and NED (J2000) positions for the milestone 5 gate (tests/galaxies.test.ts). Distances are luminosity distances with their total (statistical and systematic) 1-sigma uncertainty.",
+  "galaxies": [
+    { "name": "Andromeda Galaxy", "ra": 10.684793, "dec": 41.269065, "distMpc": 0.761, "sigmaMpc": 0.011, "source": "Li et al. 2021, ApJ 920, 84 (HST Cepheids)" },
+    { "name": "Large Magellanic Cloud", "ra": 80.894167, "dec": -69.756111, "distMpc": 0.04959, "sigmaMpc": 0.00055, "source": "Pietrzynski et al. 2019, Nature 567, 200 (eclipsing binaries)", "positionTolerance": 1800 },
+    { "name": "M87 (Virgo A)", "ra": 187.705931, "dec": 12.391123, "distMpc": 16.5, "sigmaMpc": 1.1, "source": "Mei et al. 2007, ApJ 655, 144 (ACS Virgo Cluster Survey SBF, cluster mean)" },
+    { "name": "NGC 1399", "ra": 54.621167, "dec": -35.450742, "distMpc": 20.0, "sigmaMpc": 1.4, "source": "Blakeslee et al. 2009, ApJ 694, 556 (ACS Fornax Cluster Survey SBF, cluster mean)" }
+  ],
+  "clusters": [
+    { "name": "Virgo Cluster", "distMpc": 16.5, "sigmaMpc": 1.1, "source": "Mei et al. 2007" },
+    { "name": "Fornax Cluster", "distMpc": 20.0, "sigmaMpc": 1.4, "source": "Blakeslee et al. 2009" }
+  ]
+}

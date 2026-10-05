@@ -37,3 +37,7 @@ html, body { margin: 0; height: 100%; background: #000; color: var(--ink); font:
 .label.constellation { color: #6f8fc4; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; pointer-events: none; transform: translate(-50%, -50%); }
 .label.constellation::before { display: none; }
 @media (max-width: 720px) { #layers { top: auto; bottom: 120px; } }
+.label.galaxy { color: #d8c8f0; font-size: 12px; opacity: 0.85; }
+.label.galaxy::before { width: 6px; height: 4px; border-radius: 50%; }
+.label.cluster { color: #f0c890; font-size: 12px; letter-spacing: 0.04em; }
+.label.cluster::before { width: 10px; height: 10px; border-style: dashed; }
