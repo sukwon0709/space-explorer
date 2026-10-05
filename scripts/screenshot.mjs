@@ -72,6 +72,10 @@ const views = {
   'cygnus-x1-system': `focus=Cygnus%20X-1&t=${T}&dist=2e7&pitch=0.25`,
   'tour-edge': `t=${T}&tour=1&step=14`,
   'tour-sgr-a': `t=${T}&tour=2&step=6`,
+  // Flight mode: the ship's cockpit display, with a destination picked.
+  'flight-earth': `focus=Earth&t=${T}&dist=20000&fly=1&target=Moon`,
+  'flight-saturn': `focus=Saturn&t=${T}&dist=500000&pitch=0.25&fly=1&target=Titan`,
+  'flight-moon-low': `focus=Moon&t=${T}&lat=-8&lon=-15&dist=25&heading=60&tilt=6&fly=1&target=Earth`,
 };
 const only = process.argv[3]?.split(',');
 
