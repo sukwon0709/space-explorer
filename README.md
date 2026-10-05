@@ -4,43 +4,83 @@ A real-time 3D simulator for travelling from Earth through the Solar System and 
 
 The full plan, including the roadmap, lives in the [design doc](https://claude.ai/code/artifact/c235450b-21cd-41a8-bc4b-b69ca4239c84).
 
-## Milestone 1: foundations (this code)
+## Milestone 2: Earth and Moon surfaces (this code)
 
-- **Planet positions from JPL.** Sun, planets, Moon and Pluto come from JPL's DE421 ephemeris. Its Chebyshev coefficients are used unchanged and evaluated in TypeScript (`src/core/ephemeris.ts`). Covers 1990 to 2050.
+- **Streaming terrain.** Earth and the Moon are quadtrees of terrain tiles (`src/render/globe.ts`), loaded on demand from tile packs and refined until each texel is about a pixel. Each tile's centre is float64 and its vertices are float32 offsets from it, placed relative to the camera every frame, so you can go from 1.5 m above the ground to the Moon without jitter (`tests/jitter.test.ts` replays the float32 GPU path: worst error 0.007 px).
+- **Earth.** NASA Blue Marble colour (2.4 km pixels), NOAA ETOPO 2022 heights on the WGS84 ellipsoid (EGM96 geoid added, oceans at sea level), and NASA Black Marble city lights on the night side.
+- **Grand Canyon showcase.** Copernicus Sentinel-2 10 m true colour and Copernicus DEM GLO-30 heights for the canyon (36.04–36.30 N, 112.02–112.30 W) down to tile level 13. Elsewhere Earth stops at the global data.
+- **Atmosphere.** Single-scattering Rayleigh, Mie and ozone, ray-marched per pixel for the sky and for aerial perspective and sunlight colour on the ground (`src/render/atmosphere.ts`). Stars fade out in the daytime sky.
+- **Real clouds.** One hour of NOAA's GMGSI geostationary infrared mosaic (2026-10-05 04:00 UTC) turned into cloud cover on a shell 6 km up.
+- **The Moon.** LRO LROC colour and LOLA heights, lit with a Lommel-Seeliger/Lambert mix (the flat look of the full Moon).
+- **True orientation.** Earth turns with IERS-measured UT1 and polar motion (NAIF ITRF93 kernels) and the Moon with DE440 librations (MOON_ME), fitted to Chebyshev series within 0.1 m and 1 mm on the surface (`tests/orientation.test.ts`).
+- **Positions from JPL DE440** (1960–2060), checked against the JPL Horizons API: worst difference 3.7 m for the Moon, under 0.25 m for everything else.
+- **Earth satellites.** The ISS, Tiangong, bright satellites and GPS from CelesTrak elements, propagated with SGP4 (`satellite.js`). A bundled snapshot shows at once and current elements replace it when CelesTrak can be reached. Satellites in Earth's shadow are dimmed; the two stations get labels and orbit trails. Positions match skyfield within 0.2 km (`tests/satellites.test.ts`).
+- **Google Earth style controls on Earth and the Moon.** Drag to move across the ground, right-drag or shift-drag to turn and tilt, scroll to zoom. The camera stays above the terrain.
+
+Views can be linked with URL parameters, for example `?focus=Earth&lat=36.075&lon=-112.13&dist=14&heading=10&tilt=28&t=2026-10-05T17:30Z` (degrees and km; `heading` is the direction faced, `tilt` the camera's height above the horizon seen from the look point).
+
+### Limits
+
+- Detailed imagery and terrain exist for the Grand Canyon only. The rest of Earth is 2.4 km imagery on a 10 km height grid (level 5 tiles, refined three levels further for shape only).
+- Clouds are one fixed hour; infrared misses warm low cloud and fog.
+- Blue Marble is a single cloud-free composite, not monthly.
+- The Moon's colour mosaic is stretched for display and scaled back to an average albedo of 0.12.
+- SGP4 elements are only shown within 30 days of their epoch.
+
+## Milestone 1: foundations
+
 - **Correct time scales.** UTC is converted to TDB (leap seconds, TT, TDB periodic term), the time scale the ephemeris uses (`src/core/time.ts`).
-- **Precision at every scale.** Positions stay in float64. Each frame the camera position is subtracted before anything reaches the GPU (floating origin), and a logarithmic depth buffer covers 1 m to 10^13 km.
+- **Precision at every scale.** Positions stay in float64. Each frame the camera position is subtracted before anything reaches the GPU (floating origin), and a logarithmic depth buffer covers 1 cm to 10^13 km.
 - **Real sky.** 41,411 stars from the XHIP Hipparcos compilation, coloured from their measured B–V index.
 - **True shapes.** IAU radii and oblateness, IAU pole directions, and Saturn's rings from Cassini measurements.
-- **Controls.** Drag to orbit, scroll to zoom, click a name to fly there, and use the time bar to change speed or go back in time.
-
-Views can be linked with URL parameters: `?focus=Saturn&t=2017-06-15T00:00Z&dist=420000&yaw=0.9&pitch=0.45&rate=86400`.
 
 ## Develop
 
 ```sh
 npm install
 npm run dev          # http://localhost:5173
-npm test             # ephemeris, time and precision tests
+npm test             # ephemeris, Horizons, orientation, satellites, jitter and time tests
 npm run build
 npm run screenshot   # renders reference views to screenshots/ (headless Chromium)
 ```
 
 ## Data pipeline
 
-Data files in `public/data/` are generated by Python scripts in `pipeline/`:
+Data files in `public/data/` are generated by Python scripts in `pipeline/`. Raw downloads go in a scratch directory (`DATA` below, about 3 GB).
 
 ```sh
 python3 -m pip install -r pipeline/requirements.txt
-# DE421 ships inside the skyfield-data wheel; DE440 can be used the same way once downloaded from JPL.
-python3 pipeline/build_ephemeris.py de421.bsp public/data/de421.bin --start 1990-01-01 --end 2050-12-31
-python3 pipeline/make_fixtures.py de421.bsp tests/fixtures/de421-reference.json --samples 60
+
+# Positions: DE440 from https://ssd.jpl.nasa.gov/ftp/eph/planets/bsp/de440.bsp
+python3 pipeline/build_ephemeris.py $DATA/de440.bsp public/data/de440.bin --start 1960-01-01 --end 2060-12-31
+python3 pipeline/make_fixtures.py $DATA/de440.bsp tests/fixtures/de440-reference.json --start 1960-01-01 --end 2060-12-31 --samples 70
+python3 pipeline/fetch_horizons.py tests/fixtures/horizons-reference.json
+
+# Orientation: NAIF kernels (see the script's docstring for the file list)
+python3 pipeline/build_orientation.py $DATA public/data/orientation.bin --fixtures tests/fixtures/orientation-reference.json
+
+# Surfaces and clouds
+python3 pipeline/fetch_sources.py $DATA --clouds 2026-10-05T04
+python3 pipeline/build_tiles.py $DATA public/data/tiles src/generated/tiles.json   # --only earth-night,... to rebuild some layers
+python3 pipeline/build_clouds.py $DATA/gmgsi_lw_2026-10-05T04.nc public/data/clouds.png src/generated/clouds.json
+
+# Satellites and stars
+python3 pipeline/fetch_satellites.py public/data/satellites.json
 python3 pipeline/build_stars.py node_modules/d3-celestial/data/stars.8.json public/data/stars.bin
 ```
 
-`tests/ephemeris.test.ts` checks the TypeScript evaluator against positions computed by `jplephem` from the original kernel; the largest difference must be under 1 metre.
+Tiles are geographic: level L has 2^(L+1) × 2^L tiles of 180/2^L degrees. Colour tiles are 256 px JPEG; height tiles are 65 × 65 int16 grids in 0.5 m steps (the lowest bit marks water), zlib-compressed. Tiles are grouped into packs (one file per subtree) so a view needs a handful of requests.
 
 ## Data sources
 
-- JPL DE421 planetary ephemeris (Folkner et al. 2009), via the `skyfield-data` package.
+- JPL DE440 planetary ephemeris (Park et al. 2021); JPL Horizons for the independent check.
+- NAIF SPICE kernels: Earth orientation (ITRF93) and lunar orientation (MOON_ME, DE440).
+- NASA Blue Marble: Next Generation and Black Marble 2016, MODIS land/water mask, via NASA GIBS.
+- NOAA ETOPO 2022 (60 arc-second); EGM96 geoid (NGA), via the PROJ data CDN.
+- NOAA GMGSI global geostationary infrared mosaic.
+- Contains modified Copernicus Sentinel data 2025 (Sentinel-2 L2A, tile 12SUF, 18 Oct 2025), via Element 84's Earth Search.
+- Copernicus DEM GLO-30: © DLR e.V. 2010–2014 and © Airbus Defence and Space GmbH 2014–2018, provided under COPERNICUS by the European Union and ESA.
+- LRO LROC WAC colour and LOLA elevation, from NASA SVS's CGI Moon Kit.
+- CelesTrak GP orbital elements (stations, visual, GPS).
 - XHIP: An Extended Hipparcos Compilation (Anderson & Francis 2012), via the `d3-celestial` package.
 - IAU WGCCRE 2015 report on cartographic coordinates and rotational elements (radii, poles).

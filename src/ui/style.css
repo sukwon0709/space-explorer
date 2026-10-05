@@ -13,10 +13,12 @@ html, body { margin: 0; height: 100%; background: #000; color: var(--ink); font:
 #bodies { position: fixed; top: 16px; right: 16px; display: flex; flex-direction: column; gap: 4px; }
 #bodies button, #timebar button { background: var(--panel); color: var(--ink); border: 1px solid rgba(255,255,255,0.12); border-radius: 6px; padding: 5px 10px; font: inherit; cursor: pointer; }
 #bodies button.focus, #timebar button.active { border-color: var(--accent); color: var(--accent); }
-#timebar { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); display: flex; gap: 4px; align-items: center; padding: 6px; background: var(--panel); border-radius: 8px; max-width: calc(100vw - 32px); overflow-x: auto; }
+#timebar { position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%); display: flex; gap: 4px; align-items: center; padding: 6px; background: var(--panel); border-radius: 8px; max-width: calc(100vw - 32px); overflow-x: auto; }
 #utc { padding: 0 10px; font-variant-numeric: tabular-nums; white-space: nowrap; }
-#credit { position: fixed; left: 16px; bottom: 16px; color: var(--quiet); font-size: 11px; }
+#credit { position: fixed; left: 16px; right: 16px; bottom: 6px; text-align: center; color: var(--quiet); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 @media (max-width: 720px) {
   #bodies { top: auto; bottom: 72px; right: 16px; flex-direction: row; flex-wrap: wrap; justify-content: flex-end; max-width: calc(100vw - 32px); }
   #credit { display: none; }
 }
+.label.satellite { color: #ffd27a; opacity: 0.85; pointer-events: none; }
+.label.satellite::before { border: none; width: 0; }

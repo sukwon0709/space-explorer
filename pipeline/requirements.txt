@@ -1,2 +1,9 @@
 jplephem>=2.22
 numpy>=1.26
+pillow>=10
+tifffile>=2024.1
+imagecodecs>=2024.1
+netCDF4>=1.6
+pyproj>=3.6
+spiceypy>=6
+skyfield>=1.49  # only for tests/fixtures/satellites-reference.json

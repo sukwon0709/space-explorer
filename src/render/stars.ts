@@ -56,7 +56,7 @@ export function createStarField(buffer: ArrayBuffer): THREE.Points {
   geometry.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
 
   const material = new THREE.ShaderMaterial({
-    uniforms: { pixelRatio: { value: 1 } },
+    uniforms: { pixelRatio: { value: 1 }, brightness: { value: 1 } },
     vertexShader: /* glsl */ `
       attribute float size;
       varying vec3 vColor;
@@ -71,11 +71,12 @@ export function createStarField(buffer: ArrayBuffer): THREE.Points {
       }`,
     fragmentShader: /* glsl */ `
       varying vec3 vColor;
+      uniform float brightness;
       void main() {
         float d = length(gl_PointCoord - 0.5) * 2.0;
         float a = exp(-d * d * 4.0);
         if (a < 0.02) discard;
-        gl_FragColor = vec4(vColor * a, 1.0);
+        gl_FragColor = vec4(vColor * a * brightness, 1.0);
       }`,
     vertexColors: true,
     blending: THREE.AdditiveBlending,

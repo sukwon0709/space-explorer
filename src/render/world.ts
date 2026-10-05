@@ -103,7 +103,8 @@ export class SolarSystem {
     const b: Vec3 = [0, 0, 0];
     const rel: Vec3 = [0, 0, 0];
     for (let i = 0; i < ORBIT_SAMPLES; i++) {
-      const t = t0 + ((t1 - t0) * i) / (closed ? ORBIT_SAMPLES : ORBIT_SAMPLES - 1);
+      // Clamped: rounding can push the last sample a hair past the ephemeris end.
+      const t = Math.min(t1, t0 + ((t1 - t0) * i) / (closed ? ORBIT_SAMPLES : ORBIT_SAMPLES - 1));
       this.ephemeris.position(view.body.id, t, a);
       this.ephemeris.position(orbit.around, t, b);
       icrfToScene(sub(a, b, rel), rel);
