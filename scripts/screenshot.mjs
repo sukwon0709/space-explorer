@@ -55,7 +55,6 @@ const views = {
   'andromeda-from-earth': `focus=Earth&t=${T}&dist=400000&sky=10.68,41.27&fov=6`,
   'andromeda': `focus=Andromeda%20Galaxy&t=${T}`,
   'local-group': `focus=Local%20Group&t=${T}`,
-  'lg-test': `focus=Local%20Group&t=${T}&dist=4e19&fov=60`,
   'orion-nebula': `focus=Orion%20Nebula&t=${T}`,
   'orion-from-earth': `focus=Earth&t=${T}&dist=400000&sky=83.8,-5.4&fov=12`,
   'whirlpool': `focus=Whirlpool%20Galaxy&t=${T}`,

@@ -10,14 +10,17 @@ export interface SkyImage {
   ra: number;
   dec: number;
   fov: number;
-  file: string;
+  /** The picture, absent for a nebula `within` a galaxy's own picture. */
+  file?: string;
   /** Mean linear pixel value per channel (after squaring the stored value). */
-  mean: [number, number, number];
+  mean?: [number, number, number];
   aka?: string[];
   /** Nebulae: distance (pc), its source, and the integrated V magnitude. */
   dist?: number;
   source?: string;
   V?: number;
+  /** Interacting companions that are part of this galaxy's picture. */
+  includes?: string[];
   /** A nebula already in this galaxy's own image (it is a target, but not drawn again). */
   within?: string;
 }
@@ -133,13 +136,15 @@ export class ImageLayer {
     const material = new THREE.ShaderMaterial({
       uniforms, vertexShader, fragmentShader,
       blending: THREE.AdditiveBlending, depthTest: false, depthWrite: false, transparent: false,
+      // A disc is seen from both sides.
+      side: THREE.DoubleSide,
     });
     const mesh = new THREE.Mesh(this.geometry, material);
     mesh.frustumCulled = false;
     mesh.renderOrder = -11;
     mesh.visible = false;
     this.group.add(mesh);
-    const [r, g, b] = image.mean;
+    const [r, g, b] = image.mean ?? [1, 1, 1];
     this.items.push({ image, place, mesh, uniforms, state: 'idle', meanLuma: 0.2126 * r + 0.7152 * g + 0.0722 * b, onReady });
   }
 

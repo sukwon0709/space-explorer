@@ -24,6 +24,12 @@ const LY_PER_MPC = 3.261563777e6;
  * equal to twice; e.g. Peñarrubia et al. 2014, Patel et al. 2017).
  */
 const LOCAL_GROUP_FRACTION = 0.55;
+/**
+ * Magnitudes added to a nebula's picture. The photographic plates saturate over a bright
+ * nebula's core, so scaling the picture to the nebula's total light spreads that light
+ * too evenly and leaves the core several times too faint; this restores it roughly.
+ */
+const NEBULA_CORE_GAIN = 2;
 
 export interface DeepTarget {
   id: number;
@@ -92,7 +98,7 @@ export class DeepSky {
       this.targets.push({ id: NEBULA_ID + k, name: n.name, kind: n.kind === 'emission' ? 'nebula' : n.kind, radius: this.nebulaRadiusPc(n) * 1e-6 * MPC_KM, aliases: n.aka ?? [] });
       const centre = this.positionMpc(NEBULA_ID + k);
       const pc = n.dist, v = n.V ?? 8;
-      if (!n.within) this.images.add(n, { centre, distance: pc * 1e-6, magnitude: (d) => v + 5 * Math.log10(Math.max(d, 1e-12) / (pc * 1e-6)) });
+      if (!n.within) this.images.add(n, { centre, distance: pc * 1e-6, magnitude: (d) => v - NEBULA_CORE_GAIN + 5 * Math.log10(Math.max(d, 1e-12) / (pc * 1e-6)) });
     }
     if (this.andromeda >= 0) {
       this.targets.push({ id: LOCAL_GROUP_ID, name: 'Local Group', kind: 'galaxy group', radius: 1.2 * MPC_KM, aliases: ['Local Group of galaxies'] });
@@ -125,7 +131,13 @@ export class DeepSky {
         disc: spheroid ? undefined : discAxes(b, i),
         magnitude: (d) => absMag + 5 * Math.log10(Math.max(d, 1e-12) * 1e5) + av * this.extinction,
         handover: galaxyRadiusKpc(b.radius[i]) * 1e-3,
-      }, () => this.layer.markImage(b, 0, i));
+      }, () => {
+        this.layer.markImage(b, 0, i);
+        for (const c of image.includes ?? []) {
+          const companion = byName.get(c);
+          if (companion) this.layer.markImage(b, 0, companion.i);
+        }
+      });
     }
   }
 

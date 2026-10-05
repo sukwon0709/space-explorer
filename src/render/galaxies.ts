@@ -216,7 +216,7 @@ export class GalaxyLayer {
       uBrightness: { value: 1 },
       uExtBlend: { value: 1 },
     };
-    const common = { blending: THREE.AdditiveBlending, depthTest: false, depthWrite: false, transparent: false };
+    const common = { blending: THREE.AdditiveBlending, depthTest: false, depthWrite: false, transparent: false, side: THREE.DoubleSide };
     this.pointMaterial = new THREE.ShaderMaterial({ uniforms: this.uniforms, vertexShader: pointVertex, fragmentShader: pointFragment, ...common });
     this.discMaterial = new THREE.ShaderMaterial({ uniforms: this.uniforms, vertexShader: discVertex, fragmentShader: discFragment, ...common });
     this.group.renderOrder = -12;
