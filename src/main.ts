@@ -21,6 +21,8 @@ import { StarGlobe } from './render/starglobe';
 import { MilkyWayGlow } from './render/milkyway';
 import { icrsPcToGalactocentric } from './core/milkyway';
 import { DeepSky, GALAXY_ID } from './deepsky';
+import { BlackHoles, type SStar } from './blackholes';
+import { EhtPanel, type EhtMeta } from './ui/ehtpanel';
 import { MPC_KM, type GalaxyIndex } from './core/galaxies';
 import type { SkyImage } from './render/images';
 import { CmbLayer } from './render/cmb';
@@ -69,7 +71,7 @@ interface Target {
 }
 
 async function main() {
-  const [ephemeris, orientation, starIndexRaw, namedStars, constellationData, dust, cloudTexture, satelliteSnapshot, smallBuffer, asteroidsBuffer, cometData, asteroidNames, saturnRings, galaxyIndex, galaxyBuffer, skyImages] = await Promise.all([
+  const [ephemeris, orientation, starIndexRaw, namedStars, constellationData, dust, cloudTexture, satelliteSnapshot, smallBuffer, asteroidsBuffer, cometData, asteroidNames, saturnRings, galaxyIndex, galaxyBuffer, skyImages, sstarData, ehtMeta] = await Promise.all([
     Ephemeris.load(`${BASE}data/de440.bin`),
     Orientation.load(`${BASE}data/orientation.bin`),
     fetch(`${BASE}data/stars/index.json`).then((r) => r.json()),
@@ -86,6 +88,8 @@ async function main() {
     fetch(`${BASE}data/galaxies/index.json`).then((r) => r.json() as Promise<GalaxyIndex>).catch(() => undefined),
     fetch(`${BASE}data/galaxies/local.bin`).then((r) => (r.ok ? r.arrayBuffer() : undefined)).catch(() => undefined),
     fetch(`${BASE}data/images/index.json`).then((r) => r.json() as Promise<{ images: SkyImage[] }>).then((j) => j.images).catch(() => [] as SkyImage[]),
+    fetch(`${BASE}data/blackholes/sstars.json`).then((r) => r.json() as Promise<{ stars: SStar[] }>).then((j) => j.stars).catch(() => [] as SStar[]),
+    fetch(`${BASE}data/blackholes/eht.json`).then((r) => r.json() as Promise<Record<string, EhtMeta>>).catch(() => ({}) as Record<string, EhtMeta>),
   ]);
   if (smallBuffer) ephemeris.add(smallBuffer);
   const asteroids: AsteroidSet | undefined = asteroidsBuffer ? parseAsteroids(asteroidsBuffer) : undefined;
@@ -131,6 +135,10 @@ async function main() {
     cmb = new CmbLayer(map, deep.cosmology.lastScattering);
     scene.add(cmb.mesh);
   }).catch(() => undefined);
+
+  // Black holes, with the S-stars and the companions drawn by the star field's shader.
+  const bhs = new BlackHoles(stars.material, starIndex.teff, sstarData);
+  scene.add(bhs.stars.points);
 
   const textureLoader = new THREE.TextureLoader();
   const sunMap = await textureLoader.loadAsync(`${BASE}data/maps/sun.jpg`).catch(() => undefined);
@@ -210,6 +218,8 @@ async function main() {
     targets.set(STAR_ID + k, { id: STAR_ID + k, name: star.name, kind: 'star', radius: star.radius * SOLAR_RADIUS });
   });
   for (const t of deep.targets) targets.set(t.id, { id: t.id, name: t.name, kind: t.kind, radius: t.radius });
+  for (const t of bhs.targets) targets.set(t.id, { id: t.id, name: t.name, kind: t.kind, radius: t.radius });
+  const isHole = (id: number) => bhs.has(id);
   const isStar = (id: number) => id >= STAR_ID && id < GALAXY_ID;
   const isDeep = (id: number) => deep.has(id);
   const starOf = (id: number) => namedStars[id - STAR_ID];
@@ -217,6 +227,7 @@ async function main() {
   const starPc: Vec3 = [0, 0, 0];
   const positionOf = (id: number, out: Vec3 = [0, 0, 0]): Vec3 => {
     if (isDeep(id)) return deep.position(id, out);
+    if (isHole(id)) return bhs.position(id, out);
     if (isStar(id)) {
       namedStarPosition(starOf(id), yearsSinceEpoch(clock.tdb), starPc);
       for (let k = 0; k < 3; k++) starPc[k] *= PC_KM;
@@ -258,6 +269,7 @@ async function main() {
     const centre = positionOf(id);
     const s = surfaces.get(id);
     if (isDeep(id)) return deep.frame(id, centre) ?? { origin: centre, ...SCENE_BASIS };
+    if (isHole(id)) return bhs.frame(id, centre);
     if (!s || !anchor) return { origin: centre, ...SCENE_BASIS };
     const target = s.globe.heightAt(anchor.lon, anchor.lat);
     const prev = anchorHeights.get(id) ?? target;
@@ -304,6 +316,7 @@ async function main() {
     const target = targets.get(id)!;
     if (surfaces.has(id)) return { distance: target.radius * 3, yaw: 0, pitch: 1.25, anchor: sunlitAnchor(id) };
     if (isDeep(id)) return { ...deep.view(id, target.radius), anchor: undefined };
+    if (isHole(id)) return { ...bhs.viewFor(id), anchor: undefined };
     const [yaw, pitch] = sunlitView(id);
     const body = findBody(id);
     const distance = isStar(id) ? target.radius * 6 : !body ? 3e6 : RINGS[id] && id === 699 ? target.radius * 7 : target.radius * 4;
@@ -348,6 +361,7 @@ async function main() {
     names: params.get('names') !== '0',
     planets: params.get('exoplanets') === '1',
     cmb: params.get('cmb') === '1',
+    radio: params.get('radio') !== '0',
   };
 
   // ---- Earth satellites -------------------------------------------------------
@@ -418,11 +432,13 @@ async function main() {
     for (const alias of [star.desig, star.host, ...(star.aka ?? [])]) if (alias && !byName.has(alias.toLowerCase())) byName.set(alias.toLowerCase(), STAR_ID + k);
   });
   for (const t of deep.targets) for (const alias of t.aliases) if (!byName.has(alias.toLowerCase())) byName.set(alias.toLowerCase(), t.id);
+  for (const t of bhs.targets) for (const alias of t.aliases) if (!byName.has(alias.toLowerCase())) byName.set(alias.toLowerCase(), t.id);
   const deepById = new Map(deep.targets.map((t) => [t.id, t]));
   options.append(...[...targets.values()].map((t) => {
     const o = document.createElement('option');
     o.value = t.name;
     if (isDeep(t.id)) o.label = [...(deepById.get(t.id)?.aliases.slice(0, 2) ?? []), t.kind].join(' · ');
+    else if (isHole(t.id)) o.label = 'black hole';
     else if (isStar(t.id)) {
       const star = starOf(t.id);
       o.label = [star.desig, star.host, star.planets ? `${star.planets.length} planet${star.planets.length > 1 ? 's' : ''}` : ''].filter(Boolean).join(' · ') || 'star';
@@ -466,7 +482,7 @@ async function main() {
   });
   // Sky layers: constellation figures, star names, stars with known planets.
   const layerBar = document.getElementById('layers')!;
-  for (const [key, title] of [['constellations', 'Constellations'], ['names', 'Star names'], ['planets', 'Exoplanets'], ['cmb', 'Microwave background']] as const) {
+  for (const [key, title] of [['constellations', 'Constellations'], ['names', 'Star names'], ['planets', 'Exoplanets'], ['cmb', 'Microwave background'], ['radio', 'Radio 230 GHz']] as const) {
     const button = document.createElement('button');
     button.textContent = title;
     button.classList.toggle('active', layers[key]);
@@ -476,6 +492,9 @@ async function main() {
     });
     layerBar.append(button);
   }
+  const radioButton = layerBar.lastElementChild as HTMLElement;
+  const bhLabels = new Map<number, HTMLElement>();
+  const ehtPanel = new EhtPanel(document.getElementById('eht')!, ehtMeta, `${BASE}data/blackholes/`);
 
   const satelliteLabels = new Map<number, HTMLElement>();
   for (const [id, name] of NAMED_SATELLITES) {
@@ -603,8 +622,15 @@ async function main() {
     system.update(clock.tdb);
     updateOrientation();
     const focus = targets.get(rig.focus)!;
-    rig.minDistance = rig.anchor ? 0.0015 : isDeep(focus.id) ? focus.radius * 0.02 : focus.radius * 1.0002;
-    const { eye, target, up } = rig.solve(frameOf, now);
+    rig.minDistance = rig.anchor ? 0.0015 : isDeep(focus.id) ? focus.radius * 0.02 : isHole(focus.id) ? bhs.minDistance(focus.id) : focus.radius * 1.0002;
+    const { eye, target, up, offset } = rig.solve(frameOf, now);
+    // Near a black hole the camera is placed from the hole itself: its scene position
+    // (hundreds of parsecs out) is far too coarse for a horizon tens of km across.
+    let holeRel: Vec3 | undefined;
+    if (isHole(rig.focus)) {
+      const c = bhs.position(rig.focus);
+      holeRel = [offset[0] + (target[0] - c[0]), offset[1] + (target[1] - c[1]), offset[2] + (target[2] - c[2])];
+    }
 
     // Keep the camera above the ground on bodies with terrain.
     for (const [id, s] of surfaces) {
@@ -750,6 +776,8 @@ async function main() {
     } else starGlobe.hide();
     // Up close the globe is the star: drop its point (and anything as near) from the star field.
     stars.hideWithin = isStar(rig.focus) && rig.distance < focus.radius * 200 ? (1.5 * rig.distance) / PC_KM : 0;
+    bhs.radio = layers.radio;
+    stars.hideWithin = Math.max(stars.hideWithin, bhs.update(eye, rig.focus, holeRel, clock.tdb));
 
     // Exposure follows the eye: sunlit ground at the focus body's distance from the Sun
     // looks the same everywhere, the Sun's own surface is shown at a readable level up
@@ -783,7 +811,19 @@ async function main() {
     // Asteroids and comets: a map layer, shown when the view is wide enough to see orbits.
     smallBodies?.update(clock.tdb / 86400, sunPos, eye, Math.max(smoothstep(2e6, 2e7, rig.distance), rig.focus >= ASTEROID_ID && rig.focus < STAR_ID ? 1 : 0));
 
-    renderer.render(scene, camera);
+    if (holeRel && bhs.active(rig.focus, length(holeRel), ppr)) {
+      // Lensing: the scene drawn into a view texture and a cube map around the camera,
+      // then each pixel's ray traced back through the hole's spacetime.
+      const galCam = icrsPcToGalactocentric(camPc);
+      const glowScale = (1 - 0.98 * daylight) * 10 ** (-0.4 * (26.402 - muRef - boost));
+      const setup = (cam: THREE.PerspectiveCamera, p: number, size?: number) => {
+        su.uPixelsPerRadian.value = p;
+        glow.update(renderer, cam, galCam, limit, glowScale, size);
+        deep.update(camMpc, galaxyMsat, p, 1 - 0.98 * daylight, rig.distance);
+        cmb?.update(cam, camMpc, cmbOpacity);
+      };
+      bhs.draw(renderer, scene, camera, rig.focus, eye, holeRel, clock.tdb, frameNumber, ppr, (face, size) => setup(face, size / 2, size), () => setup(camera, ppr));
+    } else renderer.render(scene, camera);
 
     // Labels: projected from camera-relative float64 positions. Placed in order of
     // importance; one that would overlap a label already placed is hidden.
@@ -819,7 +859,7 @@ async function main() {
       }
       return false;
     };
-    const smallFocus = rig.focus >= ASTEROID_ID;
+    const smallFocus = rig.focus >= ASTEROID_ID && !isHole(rig.focus);
     focusLabel.textContent = smallFocus ? focus.name : '';
     if (smallFocus) place(rig.focus, focusLabel, positionOf(rig.focus), false);
     else focusLabel.style.display = 'none';
@@ -902,6 +942,23 @@ async function main() {
       }
     }
     for (const [id, label] of deepLabels) if (!shownDeep.has(id)) label.style.display = 'none';
+    // Stars around a black hole: the S-stars of Sgr A*, a companion.
+    const shownBh = new Set<number>();
+    if (layers.names && isHole(rig.focus)) {
+      for (const [k, name, p] of bhs.labels(rig.focus)) {
+        let label = bhLabels.get(k);
+        if (!label) {
+          label = document.createElement('div');
+          label.className = 'label skystar';
+          label.textContent = name;
+          labelLayer.append(label);
+          bhLabels.set(k, label);
+        }
+        place(-4, label, p, false);
+        shownBh.add(k);
+      }
+    }
+    for (const [k, label] of bhLabels) if (!shownBh.has(k)) label.style.display = 'none';
     const constellationCentres = layers.constellations && constellations ? constellations.centres(camPc, years) : [];
     constellationLabels.forEach((label, k) => {
       if (!layers.constellations) {
@@ -943,6 +1000,8 @@ async function main() {
       if (sunVisible < 0.999) lines.push(sunVisible < 1e-6 ? 'Total solar eclipse' : `Sun ${(100 * (1 - sunVisible)).toFixed(1)}% covered`);
     } else if (isDeep(rig.focus)) {
       lines.push(...deep.describe(rig.focus, camMpc, rig.distance));
+    } else if (holeRel) {
+      lines.push(...bhs.describe(rig.focus, holeRel, clock.tdb));
     } else if (isStar(rig.focus)) {
       const star = starOf(rig.focus);
       const p = namedStarPosition(star, years, [0, 0, 0]);
@@ -965,7 +1024,7 @@ async function main() {
     } else {
       lines.push(`Camera altitude ${formatDistance(rig.distance - focus.radius)}`);
     }
-    if (focus.id !== 10 && !isStar(focus.id) && !isDeep(focus.id)) {
+    if (focus.id !== 10 && !isStar(focus.id) && !isDeep(focus.id) && !isHole(focus.id)) {
       lines.push(`${(fromSun / AU).toFixed(4)} AU from the Sun`);
       lines.push(`Sunlight takes ${formatLightTime(fromSun)} to arrive`);
     }
@@ -973,6 +1032,8 @@ async function main() {
     if (cmb && cmbOpacity > 0.05) {
       lines.push('Microwave background (Planck, false colour): blue 500 µK colder, red 500 µK hotter than 2.7255 K');
     }
+    radioButton.style.display = isHole(rig.focus) && bhs.hole(rig.focus).flow === 'hot' ? '' : 'none';
+    ehtPanel.show(isHole(rig.focus) && !rig.flying ? bhs.ehtTarget(rig.focus) : undefined);
     nameEl.textContent = focus.name;
     detailEl.textContent = lines.join('\n');
     utcEl.textContent = formatUtc(clock.utc);

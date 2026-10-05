@@ -41,3 +41,11 @@ html, body { margin: 0; height: 100%; background: #000; color: var(--ink); font:
 .label.galaxy::before { width: 6px; height: 4px; border-radius: 50%; }
 .label.cluster { color: #f0c890; font-size: 12px; letter-spacing: 0.04em; }
 .label.cluster::before { width: 10px; height: 10px; border-style: dashed; }
+#eht { position: fixed; left: 16px; bottom: 80px; padding: 8px 10px; background: var(--panel); border-radius: 8px; max-width: 300px; }
+#eht[hidden] { display: none; }
+.eht-pair { display: flex; gap: 8px; }
+.eht-pair figure { margin: 0; flex: 1; }
+.eht-pair img, .eht-pair canvas { width: 128px; height: 128px; display: block; image-rendering: auto; border-radius: 4px; }
+.eht-pair figcaption { font-size: 11px; color: var(--quiet); text-align: center; }
+.eht-caption { font-size: 11px; color: var(--quiet); white-space: pre-line; margin-top: 4px; }
+@media (max-width: 720px) { #eht { display: none; } }

@@ -62,6 +62,14 @@ const views = {
   'cosmic-web': `focus=Milky%20Way&t=${T}&dist=2e22&pitch=0.5`,
   'microwave-sky': `focus=Earth&t=${T}&dist=400000&sky=266.4,-28.9&fov=120&cmb=1`,
   'observable-universe': `focus=Milky%20Way&t=${T}&dist=1e24&pitch=0.3`,
+  // Milestone 6: black holes.
+  'sgr-a': `focus=Sgr%20A*&t=${T}`,
+  'sgr-a-visible': `focus=Sgr%20A*&t=${T}&radio=0&dist=1.2e8&pitch=0.3`,
+  's-stars': `focus=Sgr%20A*&t=${T}&dist=1.5e12&pitch=0.6&radio=0`,
+  'm87': `focus=M87*&t=${T}`,
+  'gaia-bh3': `focus=Gaia%20BH3&t=${T}`,
+  'cygnus-x1': `focus=Cygnus%20X-1&t=${T}`,
+  'cygnus-x1-system': `focus=Cygnus%20X-1&t=${T}&dist=2e7&pitch=0.25`,
 };
 const only = process.argv[3]?.split(',');
 
