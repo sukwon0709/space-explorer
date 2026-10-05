@@ -101,6 +101,12 @@ export class Ephemeris {
     let body = target;
     while (body !== 0) {
       const seg = this.byTarget.get(body);
+      // DE440 has no Mars-centre segment; Mars sits about 20 cm from its system
+      // barycentre (Phobos and Deimos are tiny), so the barycentre stands in for it.
+      if (!seg && body > 100 && body < 1000 && body % 100 === 99) {
+        body = (body - 99) / 100;
+        continue;
+      }
       if (!seg) throw new Error(`No ephemeris chain from body ${target} to the barycenter`);
       this.segmentPosition(body, tdb, step);
       out[0] += step[0];

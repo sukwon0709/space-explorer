@@ -12,6 +12,7 @@
     "screenshot": "node scripts/screenshot.mjs"
   },
   "dependencies": {
+    "satellite.js": "^6.0.2",
     "three": "^0.186.1"
   },
   "devDependencies": {
