@@ -40,6 +40,15 @@ const views = {
   'ceres': `focus=Ceres&t=${T}`,
   'asteroid-belt': `focus=Sun&t=${T}&dist=900000000&pitch=0.7`,
   'comet-encke': `focus=2P/Encke&t=${T}`,
+  // Milestone 4: the stars.
+  'orion': `focus=Earth&t=${T}&dist=400000&sky=84,-1&fov=40&constellations=1`,
+  'sky-wide': `focus=Earth&t=${T}&dist=400000&sky=290,30&fov=90`,
+  'sirius': `focus=Sirius&t=${T}`,
+  'betelgeuse': `focus=Betelgeuse&t=${T}`,
+  'trappist-1': `focus=TRAPPIST-1&t=${T}&exoplanets=1`,
+  'trappist-1-orbits': `focus=TRAPPIST-1&t=${T}&exoplanets=1&dist=25000000&pitch=0.5`,
+  'galactic-centre': `focus=Earth&t=${T}&dist=400000&sky=266.4,-28.9&fov=100`,
+  'sun-from-500pc': `focus=Sun&t=${T}&dist=1.5e16&pitch=0.15&fov=80`,
 };
 const only = process.argv[3]?.split(',');
 

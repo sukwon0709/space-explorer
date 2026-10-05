@@ -20,6 +20,17 @@ export function icrfToScene(v: Vec3, out: Vec3 = [0, 0, 0]): Vec3 {
   return out;
 }
 
+/** The inverse of icrfToScene. */
+export function sceneToIcrf(v: Vec3, out: Vec3 = [0, 0, 0]): Vec3 {
+  const x = v[0];
+  const yEcl = -v[2];
+  const zEcl = v[1];
+  out[0] = x;
+  out[1] = cosE * yEcl - sinE * zEcl;
+  out[2] = sinE * yEcl + cosE * zEcl;
+  return out;
+}
+
 /** Unit vector in ICRF for right ascension / declination in degrees. */
 export function raDecToIcrf(raDeg: number, decDeg: number, out: Vec3 = [0, 0, 0]): Vec3 {
   const ra = (raDeg * Math.PI) / 180;

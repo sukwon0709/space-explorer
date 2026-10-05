@@ -8,3 +8,7 @@ pyproj>=3.6
 spiceypy>=6
 skyfield>=1.49  # only for tests/fixtures/satellites-reference.json
 astropy>=6  # OPAL FITS maps
+pandas>=2  # star catalogues
+scipy>=1.11  # dust grid interpolation
+healpy>=1.16  # Edenhofer dust map
+pyerfa>=2  # tests/fixtures/sky-reference.json

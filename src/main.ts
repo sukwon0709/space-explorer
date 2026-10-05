@@ -4,7 +4,7 @@ import { Orientation } from './core/orientation';
 import { BODIES, RINGS, SYSTEMS, bodyById, findBody, type Body } from './core/bodies';
 import { Clock, utcToTdb } from './core/time';
 import { parseSatellites, type SatelliteSnapshot } from './core/satellites';
-import { length, sub } from './core/frames';
+import { icrfToScene, length, raDecToIcrf, sceneToIcrf, sub } from './core/frames';
 import type { Vec3 } from './core/ephemeris';
 import { bodyToGeodetic, enu, geodeticToBody, MOON_SPHERE, WGS84, type Shape } from './core/geodesy';
 import { TileStore, type Manifest } from './core/tilestore';
@@ -15,7 +15,10 @@ import { Globe, type GlobeFrame } from './render/globe';
 import { EarthSky } from './render/sky';
 import { discOverlap } from './render/shadow';
 import { SmallBodies } from './render/smallbodies';
-import { createStarField } from './render/stars';
+import { StarField, makeSingleStar, type DustGrid } from './render/stars';
+import { Constellations, type ConstellationData } from './render/constellations';
+import { StarGlobe } from './render/starglobe';
+import { PC_KM, apparentMagnitude, namedStarPosition, parseStarIndex, yearsSinceEpoch, type Exoplanet, type NamedStar } from './core/stars';
 import { NAMED_SATELLITES, SatelliteLayer } from './render/satellites';
 import { formatDistance, formatUtc } from './ui/format';
 import { EVENTS } from './ui/events';
@@ -29,6 +32,9 @@ const BASE = import.meta.env.BASE_URL;
 /** Search targets that are not globes get ids above these: asteroid or comet index added. */
 const ASTEROID_ID = 30_000_000;
 const COMET_ID = 40_000_000;
+/** Named stars (stars/named.json) get ids from here, plus their index. */
+const STAR_ID = 50_000_000;
+const SOLAR_RADIUS = 695700;
 
 interface Surface {
   globe: Globe;
@@ -55,10 +61,13 @@ interface Target {
 }
 
 async function main() {
-  const [ephemeris, orientation, starData, cloudTexture, satelliteSnapshot, smallBuffer, asteroidsBuffer, cometData, asteroidNames, saturnRings] = await Promise.all([
+  const [ephemeris, orientation, starIndexRaw, namedStars, constellationData, dust, cloudTexture, satelliteSnapshot, smallBuffer, asteroidsBuffer, cometData, asteroidNames, saturnRings] = await Promise.all([
     Ephemeris.load(`${BASE}data/de440.bin`),
     Orientation.load(`${BASE}data/orientation.bin`),
-    fetch(`${BASE}data/stars.bin`).then((r) => r.arrayBuffer()),
+    fetch(`${BASE}data/stars/index.json`).then((r) => r.json()),
+    fetch(`${BASE}data/stars/named.json`).then((r) => r.json() as Promise<NamedStar[]>).catch(() => [] as NamedStar[]),
+    fetch(`${BASE}data/stars/constellations.json`).then((r) => r.json() as Promise<ConstellationData>).catch(() => undefined),
+    loadDust(`${BASE}data/dust`).catch(() => undefined),
     new THREE.TextureLoader().loadAsync(`${BASE}data/clouds.png`).catch(() => undefined),
     fetch(`${BASE}data/satellites.json`).then((r) => r.json() as Promise<SatelliteSnapshot>).catch(() => undefined),
     Ephemeris.fetch(`${BASE}data/moons-asteroids.bin`).catch(() => undefined),
@@ -89,9 +98,16 @@ async function main() {
 
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(50, 1, 1e-5, 1e13);
-  const stars = createStarField(starData);
-  (stars.material as THREE.ShaderMaterial).uniforms.pixelRatio.value = renderer.getPixelRatio();
-  scene.add(stars);
+  const starIndex = parseStarIndex(starIndexRaw);
+  const stars = new StarField(starIndex, (k) => `${BASE}data/stars/pack-${k}.bin`, renderer.getPixelRatio(), dust);
+  scene.add(stars.group);
+  // The Sun as a star, once the camera is far enough away that its disc is a point.
+  const sunStar = makeSingleStar(stars.material, 4.83, Math.round((255 * Math.log(5772 / starIndex.teff[0])) / Math.log(starIndex.teff[1])));
+  scene.add(sunStar);
+  const constellations = constellationData ? new Constellations(constellationData, stars.uniforms) : undefined;
+  if (constellations) scene.add(constellations.lines);
+  const starGlobe = new StarGlobe();
+  scene.add(starGlobe.group);
 
   const textureLoader = new THREE.TextureLoader();
   const sunMap = await textureLoader.loadAsync(`${BASE}data/maps/sun.jpg`).catch(() => undefined);
@@ -167,8 +183,19 @@ async function main() {
     smallOrbits.set(COMET_ID + k, cometOrbit(c));
     targets.set(COMET_ID + k, { id: COMET_ID + k, name: c.name, kind: 'comet', radius: 1 });
   });
+  namedStars.forEach((star, k) => {
+    targets.set(STAR_ID + k, { id: STAR_ID + k, name: star.name, kind: 'star', radius: star.radius * SOLAR_RADIUS });
+  });
+  const isStar = (id: number) => id >= STAR_ID;
+  const starOf = (id: number) => namedStars[id - STAR_ID];
   const helio: Vec3 = [0, 0, 0];
+  const starPc: Vec3 = [0, 0, 0];
   const positionOf = (id: number, out: Vec3 = [0, 0, 0]): Vec3 => {
+    if (isStar(id)) {
+      namedStarPosition(starOf(id), yearsSinceEpoch(clock.tdb), starPc);
+      for (let k = 0; k < 3; k++) starPc[k] *= PC_KM;
+      return icrfToScene(starPc, out);
+    }
     const orbit = smallOrbits.get(id);
     if (!orbit) {
       const p = system.position(id);
@@ -242,7 +269,7 @@ async function main() {
   };
   /** For other targets: an orbit angle 35 degrees off the Sun direction, slightly above. */
   const sunlitView = (id: number): [number, number] => {
-    if (id === 10) return [-0.3, 0.9];
+    if (id === 10 || isStar(id)) return [-0.3, 0.9];
     const d = sub(system.position(10), positionOf(id), [0, 0, 0]);
     return [-(Math.atan2(d[0], d[2]) + 0.6), 0.2];
   };
@@ -251,7 +278,7 @@ async function main() {
     if (surfaces.has(id)) return { distance: target.radius * 3, yaw: 0, pitch: 1.25, anchor: sunlitAnchor(id) };
     const [yaw, pitch] = sunlitView(id);
     const body = findBody(id);
-    const distance = !body ? 3e6 : RINGS[id] && id === 699 ? target.radius * 7 : target.radius * 4;
+    const distance = isStar(id) ? target.radius * 6 : !body ? 3e6 : RINGS[id] && id === 699 ? target.radius * 7 : target.radius * 4;
     return { distance, yaw, pitch, anchor: undefined };
   };
 
@@ -277,6 +304,22 @@ async function main() {
   }
   /** Vertical field of view, degrees: narrow it to see the eclipsed Sun up close (?fov=3). */
   let fov = Number(params.get('fov') ?? 50);
+  /** ?sky=ra,dec (degrees): look at a point on the sky, celestial north up. */
+  let skyAim: Vec3 | undefined;
+  if (params.has('sky')) {
+    const [ra, dec] = params.get('sky')!.split(',').map(Number);
+    skyAim = icrfToScene(raDecToIcrf(ra, dec));
+  }
+  /**
+   * Faintest magnitude shown with a 50 degree field of view (about the naked-eye limit
+   * in a dark sky); narrower views show fainter stars, like binoculars and telescopes.
+   */
+  const magnitudeBase = Number(params.get('mlim') ?? 7.5);
+  const layers = {
+    constellations: params.get('constellations') === '1',
+    names: params.get('names') !== '0',
+    planets: params.get('exoplanets') === '1',
+  };
 
   // ---- Earth satellites -------------------------------------------------------
   // The bundled CelesTrak snapshot shows straight away; current elements replace it
@@ -342,16 +385,23 @@ async function main() {
   const options = document.getElementById('search-options') as HTMLDataListElement;
   const byName = new Map<string, number>();
   for (const t of targets.values()) byName.set(t.name.toLowerCase(), t.id);
+  namedStars.forEach((star, k) => {
+    for (const alias of [star.desig, star.host, ...(star.aka ?? [])]) if (alias && !byName.has(alias.toLowerCase())) byName.set(alias.toLowerCase(), STAR_ID + k);
+  });
   options.append(...[...targets.values()].map((t) => {
     const o = document.createElement('option');
     o.value = t.name;
-    if (t.id >= ASTEROID_ID) o.label = t.id >= COMET_ID ? 'comet' : t.kind;
+    if (isStar(t.id)) {
+      const star = starOf(t.id);
+      o.label = [star.desig, star.host, star.planets ? `${star.planets.length} planet${star.planets.length > 1 ? 's' : ''}` : ''].filter(Boolean).join(' · ') || 'star';
+    } else if (t.id >= ASTEROID_ID) o.label = t.id >= COMET_ID ? 'comet' : t.kind;
     return o;
   }));
   const go = () => {
     const q = search.value.trim().toLowerCase();
     if (!q) return;
-    const id = byName.get(q) ?? [...targets.values()].find((t) => t.name.toLowerCase().includes(q))?.id;
+    const id = byName.get(q) ?? [...targets.values()].find((t) => t.name.toLowerCase().includes(q))?.id
+      ?? [...byName.entries()].find(([name]) => name.includes(q))?.[1];
     if (id === undefined) {
       search.classList.add('miss');
       return;
@@ -363,6 +413,36 @@ async function main() {
   };
   search.addEventListener('change', go);
   search.addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });
+
+  const starLabels = new Map<number, HTMLElement>();
+  const makeStarLabel = (k: number) => {
+    const label = document.createElement('div');
+    label.className = 'label skystar';
+    label.textContent = namedStars[k].name;
+    label.addEventListener('click', () => flyTo(STAR_ID + k));
+    labelLayer.append(label);
+    return label;
+  };
+  const constellationLabels = (constellations?.data.figures ?? []).map((f) => {
+    const label = document.createElement('div');
+    label.className = 'label constellation';
+    label.textContent = f.name;
+    label.style.display = 'none';
+    labelLayer.append(label);
+    return label;
+  });
+  // Sky layers: constellation figures, star names, stars with known planets.
+  const layerBar = document.getElementById('layers')!;
+  for (const [key, title] of [['constellations', 'Constellations'], ['names', 'Star names'], ['planets', 'Exoplanets']] as const) {
+    const button = document.createElement('button');
+    button.textContent = title;
+    button.classList.toggle('active', layers[key]);
+    button.addEventListener('click', () => {
+      layers[key] = !layers[key];
+      button.classList.toggle('active', layers[key]);
+    });
+    layerBar.append(button);
+  }
 
   const satelliteLabels = new Map<number, HTMLElement>();
   for (const [id, name] of NAMED_SATELLITES) {
@@ -461,7 +541,7 @@ async function main() {
       'Planets and moons: NASA/USGS mosaics (MESSENGER, Viking, Voyager, Galileo, Cassini, New Horizons), HST OPAL',
       'Saturn rings: Cassini RSS',
       satelliteSource && `Satellites: ${satelliteSource}`,
-      'Stars: Hipparcos (XHIP)',
+      'Stars: ESA Gaia DR3, Hipparcos (XHIP), Bailer-Jones distances; dust: Edenhofer et al. 2024; exoplanets: NASA Exoplanet Archive; constellations: Stellarium',
     ].filter(Boolean).join(' · ');
   }
   updateCredits();
@@ -544,6 +624,12 @@ async function main() {
       for (let k = 0; k < 3; k++) rel[k] = fwd[k] * c + u0[k] * sn;
       viewUp = [u0[0] * c - fwd[0] * sn, u0[1] * c - fwd[1] * sn, u0[2] * c - fwd[2] * sn];
     }
+    if (skyAim && !rig.flying) {
+      rel[0] = skyAim[0]; rel[1] = skyAim[1]; rel[2] = skyAim[2];
+      const pole = icrfToScene([0, 0, 1]);
+      const along = dot(pole, skyAim);
+      viewUp = Math.abs(along) > 0.999 ? icrfToScene([1, 0, 0]) : [pole[0] - along * skyAim[0], pole[1] - along * skyAim[1], pole[2] - along * skyAim[2]];
+    }
     camera.fov = fov;
     camera.position.set(0, 0, 0);
     camera.up.set(viewUp[0], viewUp[1], viewUp[2]);
@@ -581,7 +667,38 @@ async function main() {
         daylight = Math.max(daylight, day * Math.min(1, sunVisible * 30));
       }
     }
-    (stars.material as THREE.ShaderMaterial).uniforms.brightness.value = 1 - 0.98 * daylight;
+    // ---- stars: the octree loads what can be seen from here, to the current limit.
+    const years = yearsSinceEpoch(clock.tdb);
+    const camPc = sceneToIcrf(eye, [0, 0, 0]);
+    for (let k = 0; k < 3; k++) camPc[k] /= PC_KM;
+    const limit = Math.min(14, magnitudeBase + 5 * Math.log10(50 / fov));
+    const su = stars.uniforms;
+    // A star of magnitude `limit` peaks at 1/400 of full brightness (9/255 on screen);
+    // fainter ones fade out over the next 1.5 magnitudes.
+    su.uMsat.value = limit - 6.5;
+    su.uPixelsPerRadian.value = ppr;
+    su.uBrightness.value = 1 - 0.98 * daylight;
+    stars.loadLimit = limit + 1.6;
+    stars.update(camPc, years);
+    // The Sun is drawn as a star once its disc is a point (beyond 2,000 AU).
+    const sunFar = length(sub(sunPos, eye, rel)) > 2000 * AU;
+    system.sun.group.visible = !sunFar;
+    sunStar.visible = sunFar;
+    if (sunFar) {
+      const sunPc = sceneToIcrf(sunPos, [0, 0, 0]);
+      const attr = sunStar.geometry.getAttribute('position') as THREE.BufferAttribute;
+      attr.setXYZ(0, sunPc[0] / PC_KM, sunPc[1] / PC_KM, sunPc[2] / PC_KM);
+      attr.needsUpdate = true;
+    }
+    if (constellations) constellations.opacity = layers.constellations ? 0.6 * (1 - 0.9 * daylight) : 0;
+    if (isStar(rig.focus) && rig.distance < focus.radius * 2e5) {
+      const p = positionOf(rig.focus);
+      const fromEarth = sub(p, system.position(399), [0, 0, 0]);
+      const star = starOf(rig.focus);
+      starGlobe.update(star.name, sub(p, eye, [0, 0, 0]), focus.radius, star.teff, star.planets, fromEarth);
+    } else starGlobe.hide();
+    // Up close the globe is the star: drop its point (and anything as near) from the star field.
+    stars.hideWithin = isStar(rig.focus) && rig.distance < focus.radius * 200 ? (1.5 * rig.distance) / PC_KM : 0;
 
     // Exposure follows the eye: sunlit ground at the focus body's distance from the Sun
     // looks the same everywhere, the Sun's own surface is shown at a readable level up
@@ -610,10 +727,10 @@ async function main() {
     // Orbit lines are a map of the system: they fade out close to a surface.
     let altitude = Infinity;
     for (const [id, sf] of surfaces) altitude = Math.min(altitude, bodyToGeodetic(sf.shape, bodyVector(sf, sub(eye, system.position(id), rel)))[2]);
-    system.orbitOpacity = smoothstep(100, 3000, altitude);
+    system.orbitOpacity = skyAim ? 0 : smoothstep(100, 3000, altitude);
     system.placeRelativeTo(eye, hidden, sunVisible, daylight);
     // Asteroids and comets: a map layer, shown when the view is wide enough to see orbits.
-    smallBodies?.update(clock.tdb / 86400, sunPos, eye, Math.max(smoothstep(2e6, 2e7, rig.distance), rig.focus >= ASTEROID_ID ? 1 : 0));
+    smallBodies?.update(clock.tdb / 86400, sunPos, eye, Math.max(smoothstep(2e6, 2e7, rig.distance), rig.focus >= ASTEROID_ID && !isStar(rig.focus) ? 1 : 0));
 
     renderer.render(scene, camera);
 
@@ -654,7 +771,8 @@ async function main() {
     else focusLabel.style.display = 'none';
     for (const body of LABEL_ORDER) {
       const label = labels.get(body.id)!;
-      if (!system.available(body.id)) {
+      // Beyond 2,000 AU the planets are lost in the Sun's glare: only the Sun is labelled.
+      if (!system.available(body.id) || (sunFar && body.id !== 10)) {
         label.style.display = 'none';
         continue;
       }
@@ -663,6 +781,52 @@ async function main() {
       place(body.id, label, system.position(body.id), near || hiddenBehind(body.id, toLabel));
     }
     for (const [id, button] of buttons) button.classList.toggle('focus', id === rig.focus);
+
+    // Star names: the brightest named stars in view (as seen from the camera), and with
+    // the exoplanet layer on, every star with known planets that is bright enough to see.
+    // A point a million km away in a direction (labels are placed by projecting points).
+    const skyPoint = (dirIcrf: Vec3, out: Vec3) => {
+      const d = icrfToScene(dirIcrf, out);
+      const scale = 1e6 / length(d);
+      for (let k = 0; k < 3; k++) out[k] = eye[k] + d[k] * scale;
+      return out;
+    };
+    const starCandidates: Array<[number, number]> = [];
+    if (layers.names || layers.planets) {
+      namedStars.forEach((star, k) => {
+        if (STAR_ID + k === rig.focus) return;
+        namedStarPosition(star, years, starPc);
+        const d = Math.hypot(starPc[0] - camPc[0], starPc[1] - camPc[1], starPc[2] - camPc[2]);
+        const m = apparentMagnitude(star.M, d, star.av);
+        const host = layers.planets && star.planets !== undefined;
+        if ((layers.names && m < limit - 4.5 && !star.name.startsWith('HD ')) || (host && m < limit + 1)) starCandidates.push([k, m - (host ? 5 : 0)]);
+      });
+      starCandidates.sort((a, b) => a[1] - b[1]);
+    }
+    const shownStars = new Set<number>();
+    const labelPoint: Vec3 = [0, 0, 0];
+    for (const [k] of starCandidates.slice(0, 60)) {
+      const star = namedStars[k];
+      namedStarPosition(star, years, starPc);
+      const dir: Vec3 = [starPc[0] - camPc[0], starPc[1] - camPc[1], starPc[2] - camPc[2]];
+      let label = starLabels.get(k);
+      if (!label) {
+        label = makeStarLabel(k);
+        starLabels.set(k, label);
+      }
+      label.classList.toggle('host', layers.planets && star.planets !== undefined);
+      place(STAR_ID + k, label, skyPoint(dir, labelPoint), false);
+      shownStars.add(k);
+    }
+    for (const [k, label] of starLabels) if (!shownStars.has(k)) label.style.display = 'none';
+    const constellationCentres = layers.constellations && constellations ? constellations.centres(camPc, years) : [];
+    constellationLabels.forEach((label, k) => {
+      if (!layers.constellations) {
+        label.style.display = 'none';
+        return;
+      }
+      place(-2, label, skyPoint(constellationCentres[k].dir, labelPoint), false);
+    });
 
     const earthRelLabel = sub(system.position(399), eye, [0, 0, 0]);
     for (const [id, label] of satelliteLabels) {
@@ -694,13 +858,29 @@ async function main() {
       lines.push(`Altitude ${formatDistance(h - ground)} above the ground`);
       lines.push(`${Math.abs(lat / DEG).toFixed(4)}° ${lat >= 0 ? 'N' : 'S'}, ${Math.abs(lon / DEG).toFixed(4)}° ${lon >= 0 ? 'E' : 'W'}`);
       if (sunVisible < 0.999) lines.push(sunVisible < 1e-6 ? 'Total solar eclipse' : `Sun ${(100 * (1 - sunVisible)).toFixed(1)}% covered`);
+    } else if (isStar(rig.focus)) {
+      const star = starOf(rig.focus);
+      const p = namedStarPosition(star, years, [0, 0, 0]);
+      const fromSunPc = Math.hypot(p[0], p[1], p[2]);
+      const fromEye = Math.hypot(p[0] - camPc[0], p[1] - camPc[1], p[2] - camPc[2]);
+      if (star.desig || star.host) lines.push([star.desig, star.host].filter(Boolean).join(' · '));
+      lines.push(`${formatLightYears(fromSunPc)} from the Sun (${fromSunPc < 100 ? fromSunPc.toFixed(2) : fromSunPc.toFixed(0)} pc)`);
+      lines.push(`Magnitude ${star.V.toFixed(2)} from Earth, ${apparentMagnitude(star.M, fromEye, star.av).toFixed(1)} from here`);
+      lines.push(`${star.teff.toLocaleString('en-US')} K, ${star.radius < 10 ? star.radius.toFixed(2) : star.radius.toFixed(0)} × the Sun's radius`);
+      lines.push(`Camera ${formatDistance(rig.distance)} from its centre`);
+      if (star.planets) {
+        lines.push(`${star.planets.length} known planet${star.planets.length > 1 ? 's' : ''}:`);
+        for (const pl of star.planets.slice(0, 8)) lines.push(`  ${pl.name}: ${describePlanet(pl)}`);
+        if (star.planets.length > 8) lines.push(`  and ${star.planets.length - 8} more`);
+      }
+      lines.push(star.gaia ? `Gaia DR3 ${star.gaia}` : `HIP ${star.hip} (Hipparcos)`);
     } else if (smallFocus) {
       lines.push(focus.kind === 'comet' ? 'Comet' : focus.kind);
       lines.push(`Camera ${formatDistance(rig.distance)} away`);
     } else {
       lines.push(`Camera altitude ${formatDistance(rig.distance - focus.radius)}`);
     }
-    if (focus.id !== 10) {
+    if (focus.id !== 10 && !isStar(focus.id)) {
       lines.push(`${(fromSun / AU).toFixed(4)} AU from the Sun`);
       lines.push(`Sunlight takes ${formatLightTime(fromSun)} to arrive`);
     }
@@ -709,7 +889,7 @@ async function main() {
     detailEl.textContent = lines.join('\n');
     utcEl.textContent = formatUtc(clock.utc);
     if (document.activeElement !== dateInput && frameNumber % 15 === 0) dateInput.value = new Date(clock.utc).toISOString().slice(0, 16);
-    const pending = [...surfaces.values()].reduce((n, x) => n + x.globe.pending, 0) + loading;
+    const pending = [...surfaces.values()].reduce((n, x) => n + x.globe.pending, 0) + loading + stars.pending;
     document.body.dataset.ready = 'true';
     document.body.dataset.tiles = pending === 0 ? 'idle' : 'loading';
     requestAnimationFrame(frame);
@@ -744,6 +924,42 @@ const cross = (a: Vec3, b: Vec3): Vec3 => [a[1] * b[2] - a[2] * b[1], a[2] * b[0
 function smoothstep(a: number, b: number, x: number): number {
   const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
   return t * t * (3 - 2 * t);
+}
+
+function formatLightYears(pc: number): string {
+  const ly = pc * 3.261563777;
+  return `${ly < 10 ? ly.toFixed(2) : ly < 1000 ? ly.toFixed(1) : Math.round(ly).toLocaleString('en-US')} light years`;
+}
+
+function describePlanet(p: Exoplanet): string {
+  const parts: string[] = [];
+  if (p.radius) parts.push(`${p.radius.toFixed(p.radius < 10 ? 2 : 1)} Earth radii`);
+  else if (p.mass) parts.push(`${p.mass.toFixed(p.mass < 10 ? 2 : 0)} Earth masses`);
+  if (p.period) parts.push(p.period < 2 ? `${(p.period * 24).toFixed(1)} h orbit` : p.period < 1000 ? `${p.period.toFixed(1)} day orbit` : `${(p.period / 365.25).toFixed(1)} year orbit`);
+  if (p.a) parts.push(`${p.a.toFixed(p.a < 1 ? 3 : 2)} AU`);
+  if (p.year) parts.push(`found ${p.year}`);
+  return parts.join(', ');
+}
+
+/** The 3D dust grid (pipeline/build_dust.py): a JSON header and a uint8 volume. */
+async function loadDust(base: string): Promise<DustGrid> {
+  const [meta, buffer] = await Promise.all([
+    fetch(`${base}.json`).then((r) => (r.ok ? r.json() : Promise.reject(new Error(`${r.status}`)))),
+    fetch(`${base}.bin`).then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(`${r.status}`)))),
+  ]);
+  const [nx, ny, nz] = meta.shape as [number, number, number];
+  const texture = new THREE.Data3DTexture(new Uint8Array(buffer), nx, ny, nz);
+  texture.format = THREE.RedFormat;
+  texture.type = THREE.UnsignedByteType;
+  texture.minFilter = texture.magFilter = THREE.LinearFilter;
+  texture.unpackAlignment = 1;
+  texture.needsUpdate = true;
+  // lo and hi are cell centres; the texture spans the cells' outer edges.
+  const n = [nx, ny, nz];
+  const cell = n.map((k, a) => (meta.hi[a] - meta.lo[a]) / (k - 1));
+  const lo = n.map((_, a) => meta.lo[a] - cell[a] / 2) as Vec3;
+  const size = n.map((k, a) => cell[a] * k) as Vec3;
+  return { texture, lo, size, scale: meta.scale };
 }
 
 function formatLightTime(km: number): string {
