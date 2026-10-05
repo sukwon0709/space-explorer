@@ -327,7 +327,7 @@ export class Ship {
       if (l.soft) continue;
       const d = sub(l.pos, abs);
       const dist = length(d);
-      if (dist - l.radius < l.arrive && dot(d, f) > 0 && missDistance(d, f) < l.radius + l.arrive) return { kind: 'mass-lock', id: l.id };
+      if (dist - l.radius < 0.5 * l.arrive && onCourse(d, f, l)) return { kind: 'mass-lock', id: l.id };
     }
     this.warp = { on: true, speed: Math.max(WARP_MIN, length(this.vel)), set: auto ? Infinity : C_KMS };
     this.landed = undefined;
@@ -347,10 +347,10 @@ export class Ship {
     for (const l of limiters) {
       const d = sub(l.pos, abs);
       const dist = length(d);
-      const ahead = dot(d, f) > 0 && missDistance(d, f) < l.radius + 2 * l.arrive;
+      const ahead = onCourse(d, f, l);
       let c: number;
       if (l.soft) {
-        if (!ahead && dist > l.radius) continue;
+        if (!(dot(d, f) > 0 && missDistance(d, f) < l.radius) && dist > l.radius) continue;
         c = Math.max(dist - l.radius, 0.3 * l.radius) / WARP_TAU_IN;
       } else {
         const gap = dist - l.radius;
@@ -422,6 +422,11 @@ export function apsides(rel: Vec3, vel: Vec3, gm: number): { peri: number; apo: 
   const peri = p / (1 + e);
   const apo = energy < 0 ? (-gm / (2 * energy)) * (1 + Math.min(e, 1)) : Infinity;
   return { peri, apo, e };
+}
+
+/** Is the ship headed into it (or, for a destination with no size, into its arrival sphere)? */
+function onCourse(d: Vec3, f: Vec3, l: WarpLimiter): boolean {
+  return dot(d, f) > 0 && missDistance(d, f) < (l.radius > 0 ? 1.2 * l.radius : l.arrive);
 }
 
 /** Perpendicular distance from a point at `d` (relative) to the line along unit `f`. */

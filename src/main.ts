@@ -1133,7 +1133,8 @@ async function main() {
       const dist = length(d);
       const closing = s.warp.on ? s.warp.speed * Math.max(0, dot(d, s.forward()) / dist) : -dot(v, d) / dist;
       const eta = closing > 0 ? dist / closing : Infinity;
-      out.push(`→ ${nameOf(flight.target)}: ${formatDistance(dist)}${Number.isFinite(eta) && eta < 3.15e10 ? `, ${formatDuration(eta)} at this speed` : ''}`);
+      const surface = findBody(flight.target)?.radius[0] ?? (isStar(flight.target) ? starOf(flight.target).radius * SOLAR_RADIUS : 0);
+      out.push(`→ ${nameOf(flight.target)}: ${formatDistance(Math.max(0, dist - surface))}${Number.isFinite(eta) && eta < 3.15e10 ? `, ${formatDuration(eta)} at this speed` : ''}`);
       markDir('target', d, nameOf(flight.target));
     } else hud.mark('target', 0, 0, false);
     hud.set(out);
