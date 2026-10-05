@@ -11,8 +11,8 @@ html, body { margin: 0; height: 100%; background: #000; color: var(--ink); font:
 #focus-name { font-size: 20px; font-weight: 600; }
 #focus-detail { color: var(--quiet); white-space: pre-line; }
 #bodies { position: fixed; top: 16px; right: 16px; display: flex; flex-direction: column; gap: 4px; }
-#bodies button, #timebar button, #search, #date, #events { background: var(--panel); color: var(--ink); border: 1px solid rgba(255,255,255,0.12); border-radius: 6px; padding: 5px 10px; font: inherit; cursor: pointer; }
-#bodies button.focus, #timebar button.active { border-color: var(--accent); color: var(--accent); }
+#bodies button, #layers button, #timebar button, #search, #date, #events { background: var(--panel); color: var(--ink); border: 1px solid rgba(255,255,255,0.12); border-radius: 6px; padding: 5px 10px; font: inherit; cursor: pointer; }
+#bodies button.focus, #layers button.active, #timebar button.active { border-color: var(--accent); color: var(--accent); }
 #timebar { position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%); display: flex; gap: 4px; align-items: center; padding: 6px; background: var(--panel); border-radius: 8px; max-width: calc(100vw - 32px); overflow-x: auto; }
 #utc { padding: 0 10px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 #credit { position: fixed; left: 16px; right: 16px; bottom: 6px; text-align: center; color: var(--quiet); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -28,3 +28,12 @@ html, body { margin: 0; height: 100%; background: #000; color: var(--ink); font:
 .label.moon, .label.asteroid { font-size: 12px; opacity: 0.85; }
 .label.moon::before, .label.asteroid::before { width: 5px; height: 5px; }
 .label.smallbody { color: #9fe3ff; }
+#layers { position: fixed; top: 16px; left: 50%; transform: translateX(-50%); display: flex; gap: 4px; }
+#layers button { font-size: 12px; padding: 4px 9px; }
+.label.skystar { color: #c9d4e6; font-size: 12px; opacity: 0.8; }
+.label.skystar::before { width: 5px; height: 5px; border-color: transparent; }
+.label.skystar.host { color: #8fe0b0; }
+.label.skystar.host::before { border-color: currentColor; }
+.label.constellation { color: #6f8fc4; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; pointer-events: none; transform: translate(-50%, -50%); }
+.label.constellation::before { display: none; }
+@media (max-width: 720px) { #layers { top: auto; bottom: 120px; } }

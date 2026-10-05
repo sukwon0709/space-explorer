@@ -4,7 +4,32 @@ A real-time 3D simulator for travelling from Earth through the Solar System and 
 
 The full plan, including the roadmap, lives in the [design doc](https://claude.ai/code/artifact/c235450b-21cd-41a8-bc4b-b69ca4239c84).
 
-## Milestone 3: the Solar System (this code)
+## Milestone 4: the stars (this code)
+
+- **3.4 million stars from Gaia DR3 and Hipparcos** (`pipeline/build_stars.py`). The catalogue has every Gaia star brighter than G = 12, every star within 100 pc down to Gaia's limit, and Hipparcos (XHIP) for the bright stars Gaia saturates on. Distances are 1/parallax where the parallax is good to 20%, otherwise Bailer-Jones et al. (2021). Stars are stored at J2016.0 with their 3D space velocities, so proper motion, radial velocity and parallax all come out of one straight-line motion, as in SOFA's `pmsafe`. They live in an octree of 1,426 nodes in 53 packs (75 MB) that stream in as the camera moves, brightest first (`src/render/stars.ts`).
+- **Brightness and colour from wherever you are.** Each star keeps its absolute V magnitude and temperature, so its apparent magnitude is recomputed from the camera position. Fly to another star and the sky rearranges and re-brightens correctly. Colours are blackbody colours of each star's temperature, from its dereddened Gaia BP-RP or Hipparcos B-V (Pecaut and Mamajek 2013). Bright stars spread into glare, and stars near enough to resolve are drawn as discs.
+- **3D dust** (`pipeline/build_dust.py`). The Edenhofer et al. (2024) dust map out to 1,250 pc is resampled to a 256 x 256 x 80 grid. From Earth, each star carries its catalogue extinction. Away from the Sun, the shader ray-marches the grid from the camera to each star, so dust clouds dim and redden the stars behind them from any viewpoint.
+- **Exoplanets.** 5,991 planets around 4,420 stars from the NASA Exoplanet Archive. Search any host (e.g. TRAPPIST-1) to fly to it and see the star at its true size and colour with its planets' orbits. The `Exoplanets` button labels every planet host in view.
+- **Constellations.** The 88 IAU constellation figures (Stellarium's modern sky culture), drawn through the stars' true current positions, so they distort as you leave the Sun.
+- **Named stars.** 7,809 stars with IAU names, Bayer/Flamsteed designations or planets are searchable and clickable. The panel shows the distance, magnitude from Earth and from the camera, temperature, radius and planets.
+- **Gate:** the sky from Earth matches the catalogues (`tests/stars.test.ts`, against `tests/fixtures/sky-reference.json` computed independently with ERFA from the original catalogues).
+  - Every Hipparcos star brighter than V = 6.5 is where Hipparcos puts it in 1960, 2026 and 2060. In 2026 the median error is 0.037", and 99% are within 0.72".
+  - Gaia stars are within 9 mas of Gaia DR3.
+  - Magnitudes match Hipparcos V to 0.012 mag (95%) for V < 6. They match Tycho-2 V to a median of 0.03 mag down to V = 10.5.
+  - The app shows 8,720 naked-eye stars against Hipparcos's 8,726.
+  - float32 rounding on the GPU stays under 25 mas from Earth, from 8 pc away and from 430 pc away.
+
+New URL parameters: `sky=ra,dec` points the view at a sky position (degrees, celestial north up), `mlim` sets the faintest magnitude shown at a 50° field, and `constellations=1`, `names=0` and `exoplanets=1` set the layers. `focus` takes star names (`?focus=Betelgeuse`). For example, Orion from Earth is `?focus=Earth&dist=400000&sky=84,-1&fov=40&constellations=1`.
+
+### Limits
+
+- Gaia stars fainter than G = 12 are included only within 100 pc, so the Milky Way shows as stars, not as its diffuse glow. Faint stars far from the Sun are missing when you fly out.
+- Binary and multiple stars are drawn as their catalogue entries, without orbital motion. Stars without a radial velocity move only across the sky.
+- The dust map stops at 1,250 pc from the Sun, and from Earth stars beyond it get no extra extinction. Inside the box, the ray march takes 16 samples per star, so thin filaments are smoothed.
+- Exoplanet orbits are drawn edge-on as seen from Earth (true for transiting planets), because most orbits' orientations are unknown.
+- Nebulae are not drawn yet.
+
+## Milestone 3: the Solar System
 
 - **Every planet, the major moons, Pluto and Charon, and Ceres, Vesta, Pallas and Hygiea** (`src/core/bodies.ts`), as triaxial ellipsoids with IAU 2015 radii, turning with the IAU rotation models from NAIF's pck00011 (`src/core/iau.ts`, matching SPICE to 1e-9 rad in `tests/rotation.test.ts`).
 - **Moon and asteroid positions from JPL's satellite and asteroid kernels** (mar099, jup365, sat441, ura184, nep097, plu060, sb441-n16), refitted to float32 Chebyshev series within 1 km and checked against the kernels at 930 epochs that were not fitted (`tests/moons.test.ts`). Each system's file loads when the camera nears it.
@@ -97,9 +122,15 @@ python3 pipeline/build_sun.py 2026-09-21T15:15:00 public/data/maps/sun.jpg src/g
 python3 pipeline/fetch_smallbodies.py public/data
 python3 pipeline/fetch_eclipse.py tests/fixtures/eclipse-2027-08-02.json
 
-# Satellites and stars
+# Satellites
 python3 pipeline/fetch_satellites.py public/data/satellites.json
-python3 pipeline/build_stars.py node_modules/d3-celestial/data/stars.8.json public/data/stars.bin
+
+# Stars, dust, exoplanets and constellations, and the sky gate's reference positions
+python3 pipeline/fetch_stars.py $DATA          # Gaia DR3 (ESA archive), VizieR, NASA Exoplanet Archive, Stellarium
+curl -L -o $DATA/edenhofer_mean_std_healpix.fits https://zenodo.org/records/10658339/files/mean_std_healpix.fits
+(cd pipeline && python3 build_dust.py $DATA ../public/data)
+python3 pipeline/build_stars.py $DATA public/data --dust $DATA/dust-grid.npz
+python3 pipeline/make_sky_fixtures.py $DATA tests/fixtures/sky-reference.json
 ```
 
 Tiles are geographic: level L has 2^(L+1) × 2^L tiles of 180/2^L degrees. Colour tiles are 256 px JPEG; height tiles are 65 × 65 int16 grids in 0.5 m steps (the lowest bit marks water), zlib-compressed. Tiles are grouped into packs (one file per subtree) so a view needs a handful of requests.
@@ -115,7 +146,12 @@ Tiles are geographic: level L has 2^(L+1) × 2^L tiles of 180/2^L degrees. Colou
 - Copernicus DEM GLO-30: © DLR e.V. 2010–2014 and © Airbus Defence and Space GmbH 2014–2018, provided under COPERNICUS by the European Union and ESA.
 - LRO LROC WAC colour and LOLA elevation, from NASA SVS's CGI Moon Kit.
 - CelesTrak GP orbital elements (stations, visual, GPS).
-- XHIP: An Extended Hipparcos Compilation (Anderson & Francis 2012), via the `d3-celestial` package.
+- ESA Gaia DR3 (Gaia Collaboration 2023), with distances from Bailer-Jones et al. (2021). This work has made use of data from the European Space Agency (ESA) mission Gaia, processed by the Gaia Data Processing and Analysis Consortium (DPAC).
+- Hipparcos (ESA 1997) and XHIP: An Extended Hipparcos Compilation (Anderson & Francis 2012); Tycho-2 (Høg et al. 2000), via VizieR (CDS, Strasbourg). Star names via the `d3-celestial` package.
+- 3D dust map of Edenhofer et al. (2024), Zenodo 10658339.
+- NASA Exoplanet Archive, Planetary Systems Composite Parameters (NASA Exoplanet Science Institute, Caltech/IPAC).
+- Stellarium modern sky culture constellation figures (GPL-2.0).
+- Pecaut & Mamajek (2013) stellar colour and temperature table; Riello et al. (2021) Gaia-to-Johnson transformations.
 - IAU WGCCRE 2015 report on cartographic coordinates and rotational elements (radii, poles, rotation), via NAIF pck00011.
 - NAIF satellite ephemerides mar099, jup365, sat441, ura184, nep097, plu060 (Jacobson et al.) and JPL's sb441-n16 asteroid ephemeris.
 - USGS Astrogeology global mosaics: MESSENGER MDIS (NASA/JHUAPL/CIW), Viking Orbiter, Mars Express SRC (ESA/DLR/FU Berlin), Galileo SSI and Voyager, Cassini ISS (NASA/JPL), Dawn FC (NASA/JPL, DLR), New Horizons LORRI (NASA/JHUAPL/SwRI).
