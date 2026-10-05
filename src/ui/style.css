@@ -73,3 +73,36 @@ html, body { margin: 0; height: 100%; background: #000; color: var(--ink); font:
   #tour { bottom: 160px; }
   .tour-caption { font-size: 13px; }
 }
+/* The ship: readouts at the bottom left, markers on the view, buttons for touch screens. */
+#fly { border-color: var(--accent); color: var(--accent); margin-bottom: 4px; }
+#fly.active { background: rgba(127, 176, 255, 0.18); }
+#flight { position: fixed; left: 16px; bottom: 80px; padding: 8px 12px; background: var(--panel); border-radius: 8px; max-width: min(420px, calc(100vw - 32px)); font-variant-numeric: tabular-nums; }
+#flight[hidden], #flight-pad[hidden], .flight-mark[hidden], .flight-help[hidden] { display: none; }
+.flight-lines { white-space: pre-line; }
+.flight-help-button { margin-top: 6px; background: none; color: var(--accent); border: 1px solid rgba(127, 176, 255, 0.4); border-radius: 6px; padding: 2px 8px; font: inherit; font-size: 12px; cursor: pointer; }
+.flight-help { margin-top: 6px; font-size: 12px; color: var(--quiet); line-height: 1.6; }
+.flight-help b { color: var(--ink); font-weight: 600; }
+.flight-message { position: fixed; left: 50%; top: 22%; transform: translateX(-50%); max-width: min(560px, calc(100vw - 32px)); text-align: center; font-size: 15px; text-shadow: 0 1px 4px #000; pointer-events: none; }
+.flight-mark { position: fixed; transform: translate(-50%, -50%); pointer-events: none; color: #8fe0b0; font-size: 12px; }
+.flight-mark.nose { width: 26px; height: 26px; }
+.flight-mark.nose::before, .flight-mark.nose::after { content: ''; position: absolute; background: rgba(232, 236, 242, 0.55); }
+.flight-mark.nose::before { left: 0; right: 0; top: 12px; height: 1.5px; }
+.flight-mark.nose::after { top: 0; bottom: 0; left: 12px; width: 1.5px; }
+.flight-mark.prograde, .flight-mark.retrograde { width: 16px; height: 16px; border: 1.5px solid #ffd27a; border-radius: 50%; }
+.flight-mark.prograde::after { content: ''; position: absolute; left: 5px; top: 5px; width: 3px; height: 3px; border-radius: 50%; background: #ffd27a; }
+.flight-mark.retrograde::before, .flight-mark.retrograde::after { content: ''; position: absolute; left: 6.5px; top: -3px; width: 1.5px; height: 20px; background: #ffd27a; transform: rotate(45deg); }
+.flight-mark.retrograde::after { transform: rotate(-45deg); }
+.flight-mark.target { padding-left: 20px; white-space: nowrap; transform: translate(-9px, -50%); }
+.flight-mark.target::before { content: ''; position: absolute; left: 2px; top: 50%; width: 12px; height: 12px; border: 1.5px solid currentColor; transform: translateY(-50%) rotate(45deg); }
+.flight-mark.target.edge { opacity: 0.8; }
+body.flying #view { cursor: crosshair; }
+#flight-pad { position: fixed; left: 8px; right: 8px; bottom: 120px; display: flex; justify-content: space-between; pointer-events: none; }
+.pad-group { display: grid; grid-template-columns: repeat(2, 64px); gap: 6px; pointer-events: auto; }
+#flight-pad button { height: 48px; background: var(--panel); color: var(--ink); border: 1px solid rgba(255,255,255,0.18); border-radius: 10px; font: inherit; touch-action: none; user-select: none; -webkit-user-select: none; }
+#flight-pad button:active { border-color: var(--accent); color: var(--accent); }
+@media (pointer: fine) { #flight-pad { display: none; } }
+@media (max-width: 720px) {
+  #flight { left: 8px; right: 8px; bottom: auto; top: 96px; max-width: none; font-size: 12px; }
+  #flight-pad { bottom: 160px; }
+  .flight-message { top: 40%; font-size: 14px; }
+}

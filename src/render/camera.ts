@@ -75,6 +75,24 @@ export class CameraRig {
     this.anchor = anchor;
   }
 
+  /**
+   * Look at `focus` (whose frame is `frame`) from where the camera already is: `offset`
+   * is eye minus the look point. Used when leaving the ship.
+   */
+  place(focus: number, frame: Frame, offset: Vec3): void {
+    const d = Math.hypot(offset[0], offset[1], offset[2]);
+    const o = offset.map((v) => v / d) as Vec3;
+    const { east, north, up } = frame;
+    const sp = Math.max(-1, Math.min(1, o[0] * up[0] + o[1] * up[1] + o[2] * up[2]));
+    const h = [0, 1, 2].map((k) => -(o[k] - sp * up[k]));
+    this.flight = undefined;
+    this.focus = this.target = focus;
+    this.anchor = undefined;
+    this.distance = d;
+    this.pitch = Math.asin(sp);
+    this.yaw = Math.atan2(h[0] * east[0] + h[1] * east[1] + h[2] * east[2], h[0] * north[0] + h[1] * north[1] + h[2] * north[2]);
+  }
+
   orbit(dx: number, dy: number): void {
     if (this.flight) return;
     this.yaw += dx * 0.005;

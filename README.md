@@ -4,7 +4,32 @@ A real-time 3D simulator for travelling from Earth through the Solar System and 
 
 The full plan, including the roadmap, lives in the [design doc](https://claude.ai/code/artifact/c235450b-21cd-41a8-bc4b-b69ca4239c84).
 
-## Milestone 6: black holes and tours (this code)
+## Flight mode (this code)
+
+Besides picking a name and flying there, you can now pilot a ship yourself. `Pilot a ship` (top right, or `?fly=1`) hands you the controls where the camera is; `Leave the ship` (or Esc) gives the camera back.
+
+- **Real gravity** (`src/core/gravity.ts`, `src/core/flight.ts`). Every body with a known mass pulls on the ship: the Sun, planets, Moon and Pluto always, a planet's moons and the four big asteroids within 0.3 AU, the named stars within 0.05 pc (masses from their size and temperature), and the black holes within 10 pc. Masses are the DE440 and JPL satellite ephemeris values. Near a black hole the pull follows the Paczyński–Wiita potential, so it grows faster than Newton's near the horizon, and crossing the horizon loses the ship (a new one appears 30 GM/c² out).
+- **Exact anywhere.** The ship's position and velocity are kept relative to whatever dominates where it is (the smallest sphere of influence it is in, else the nearest star or black hole, else the galaxy it is in), and that object's own acceleration comes from the ephemeris. So orbits close to a moon and drifts between galaxies are both computed without rounding. Gravity is integrated with velocity Verlet in steps short against the quickest orbit nearby.
+- **Engines and flight assist.** W/S thrust forward and back, A/D sideways, R/F up and down; drag or the arrow keys turn, Q/E roll. The wheel sets engine power (0.01 g to 10,000 g, 3 g to start), and Shift multiplies it by ten. With flight assist on (Z toggles it), the ship stops turning and drifting when you let go, as hard as the engines allow. Gravity still wins: hovering near Earth with flight assist you sink at about 12 m/s until you push up. With it off, the ship coasts and falls freely, so orbits work: the display shows the orbit's low and high points, or that you are falling back or escaping. Near a turning body, "still" means still over the ground. Close to light speed, the engines push less (special relativity) and the display shows how much slower time runs on board.
+- **Landing.** The ship stands on the ground instead of passing through it: Earth and Moon terrain, and the 1 bar level of the giant planets.
+- **Warp drive.** X engages it; W/S make it faster or slower, up to 10^16 times light speed. It slows itself near anything ahead (it can cover the distance to it in about two seconds, never less than the distance) and drops out one radius above a planet or moon, 10 radii from a star, 15 solar radii from the Sun, 25 GM/c² from a black hole. Galaxies slow it but never stop it. It won't start pointed at a body you are already that close to. Out of warp, the ship is at rest relative to where it arrived.
+- **Destinations.** In the ship, picking a name (search, the planet buttons, or a label) sets a destination instead of flying there. A marker shows where it is, with the distance and how long it will take at this speed. T turns the nose toward it, X warps there (the drive stops there by itself), and G jumps there straight away with the usual animated flight, then gives the controls back.
+- **Phones.** Drag to turn; on-screen buttons for thrust, reverse, roll, warp, flight assist, aiming and jumping.
+- **Gate:** the ship's gravity reproduces real orbits (`tests/flight.test.ts`).
+  - Started where the Moon is, moving as it moves, the ship (feeling every body but the Moon) follows the Moon's DE440 path to within 0.6 km over a week. Started as the Earth-Moon barycentre, it follows DE440 around the Sun to within 14 km over 60 days.
+  - The pull at each surface matches NASA's fact sheets to 1% (Earth 9.80, Moon 1.62, Jupiter 24.79, Sun 274 m/s²). A 420 km circular orbit takes 92.8 minutes, the ISS's period, and closes after one lap.
+  - The warp drive carries the ship from Earth to the Moon in under 20 seconds and drops out between 0.9 and 1 lunar radius above the surface, never closer.
+- `scripts/fly-check.mjs` flies the ship in headless Chromium (Earth, warp to the Moon, warp to Sirius) and prints the cockpit readouts.
+
+New parameters: `?fly=1` starts in the ship, `&target=Moon` picks a destination, `&power=3` sets the engines (g), `&assist=0` starts with flight assist off.
+
+### Limits
+
+- Bodies pull as points: no oblateness (Earth's J2), so low orbits don't precess as real ones do. There is no atmosphere, so no drag or re-entry heating.
+- Stars' masses are estimated from a main-sequence mass-luminosity relation, which overestimates giants. Galaxies and the S-stars do not pull on the ship.
+- The warp drive is fiction, made to feel like Elite's supercruise; nothing about it is physics.
+
+## Milestone 6: black holes and tours
 
 - **Black holes, ray-traced in the Kerr metric** (`src/core/kerr.ts`, `src/render/blackhole.ts`). Near a black hole, every pixel's light ray is followed back from the camera along a null geodesic of the spinning (Kerr) spacetime, in Boyer-Lindquist coordinates with fourth-order Runge-Kutta steps on the photon's Hamiltonian. The camera is a zero-angular-momentum observer, so its view includes aberration and the hole's frame dragging. Rays that pass farther than 100 GM/c² are bent with the weak-field formula instead. What a ray meets decides the pixel: the horizon (black), the accretion flow, a companion star, or the sky it came from, looked up in a cube map of the scene drawn around the camera. The same equations run in TypeScript for the tests and in the shader. On the spin axis, where these coordinates are singular, rays are carried straight over the pole.
 - **Six black holes** (`src/core/blackholes.ts`, `pipeline/fetch_blackholes.py`), each with its measured mass, distance and orientation where one is known.
@@ -139,7 +164,7 @@ Views can be linked with URL parameters, for example `?focus=Earth&lat=36.075&lo
 ```sh
 npm install
 npm run dev          # http://localhost:5173
-npm test             # ephemeris, Horizons, orientation, rotation, moons, eclipse, satellites, jitter and time tests
+npm test             # ephemeris, Horizons, orientation, rotation, moons, eclipse, satellites, jitter, time, sky, galaxy, black hole and flight tests
 npm run build
 npm run screenshot   # renders reference views to screenshots/ (headless Chromium)
 ```

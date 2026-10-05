@@ -31,6 +31,12 @@ import { NAMED_SATELLITES, SatelliteLayer } from './render/satellites';
 import { formatDistance, formatUtc } from './ui/format';
 import { EVENTS } from './ui/events';
 import { TOURS, TourPlayer, type TourStep } from './ui/tours';
+import { FlightControls, FlightHud } from './ui/flight';
+import { Ship, apsides, type FlightWorld, type Source, type WarpLimiter } from './core/flight';
+import { C_KMS, G0, GM, SolarGravity } from './core/gravity';
+import { hasRotation, iauBodyToScene } from './core/iau';
+import { horizon } from './core/kerr';
+import { SUN_GM_KM } from './core/blackholes';
 import manifest from './generated/tiles.json';
 import cloudsMeta from './generated/clouds.json';
 import mapsMeta from './generated/maps.json';
@@ -401,8 +407,11 @@ async function main() {
   const labels = new Map<number, HTMLElement>();
   const buttons = new Map<number, HTMLButtonElement>();
   /** Fly to a target once its position is known (a moon's orbit may still be loading). */
+  /** In the ship, picking a name sets the destination instead of flying there. */
+  let pick: ((id: number) => boolean) | undefined;
   const flyTo = (id: number) => {
     prepare(id);
+    if (pick?.(id)) return;
     waitFor(() => id >= ASTEROID_ID || system.available(id), 30000).then(() => {
       const v = viewFor(id);
       rig.flyTo(id, v.distance, performance.now() / 1000, v.yaw, v.pitch, v.anchor);
@@ -545,6 +554,10 @@ async function main() {
     const dx = e.clientX - last.x, dy = e.clientY - last.y;
     last.x = e.clientX;
     last.y = e.clientY;
+    if (controls.active) {
+      if (pointers.size === 1) controls.drag(dx, dy);
+      return;
+    }
     if (pinchState && pointers.size === 2) {
       const now = pinch();
       if (now.d > 0 && pinchState.d > 0) rig.zoom(Math.log(pinchState.d / now.d) / 0.0015);
@@ -556,7 +569,11 @@ async function main() {
     if (rig.anchor && drag.button === 0 && !drag.shift) rig.pan(dx, dy, pixelsPerRadian(), targets.get(rig.focus)!.radius);
     else rig.orbit(dx, dy);
   });
-  canvas.addEventListener('wheel', (e) => { e.preventDefault(); rig.zoom(e.deltaY); }, { passive: false });
+  canvas.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    if (controls.active) controls.scroll(e.deltaY);
+    else rig.zoom(e.deltaY);
+  }, { passive: false });
 
   // ---- time bar -------------------------------------------------------------
   const rateButtons = [...document.querySelectorAll<HTMLButtonElement>('#timebar button[data-rate]')];
@@ -652,6 +669,339 @@ async function main() {
     if (tour) tours.start(tour, Number(params.get('step') ?? 1) - 1);
   }
 
+
+  // ---- the ship ---------------------------------------------------------------
+  // An optional piloted mode: the camera becomes a ship that flies under the gravity
+  // of the real bodies (core/flight.ts), with a warp drive for the long distances.
+  const solar = new SolarGravity(ephemeris);
+  const scratch: Vec3 = [0, 0, 0];
+  const zero = (out: Vec3) => { out[0] = out[1] = out[2] = 0; return out; };
+  /** Stars' masses from their size and temperature (main-sequence mass-luminosity, M ~ L^(1/3.5)). */
+  const starMass = (star: NamedStar) => Math.min(60, Math.max(0.08, Math.pow(star.radius ** 2 * (star.teff / 5772) ** 4, 1 / 3.5)));
+  const holeHorizon = (id: number) => horizon(bhs.hole(id).spin) * bhs.hole(id).mass * SUN_GM_KM;
+  const isSmall = (id: number) => smallOrbits.has(id);
+  /** A small body's position at any time (positionOf only knows the clock's time). */
+  const smallAt = (id: number, tdb: number, out: Vec3) => {
+    orbitPosition(smallOrbits.get(id)!, tdb / 86400, helio);
+    const sun = solar.position(10, tdb, scratch);
+    out[0] = sun[0] + helio[0];
+    out[1] = sun[1] + helio[2];
+    out[2] = sun[2] - helio[1];
+    return out;
+  };
+  const rotationAt = (id: number, tdb: number, out: Float64Array) => {
+    if (orientation.has(id)) return orientation.bodyToScene(id, tdb, out);
+    if (hasRotation(id)) return iauBodyToScene(id, tdb, out);
+    return undefined;
+  };
+  const m0 = new Float64Array(9), m1 = new Float64Array(9);
+  const flightWorld: FlightWorld = {
+    position(id, tdb, out = [0, 0, 0]) {
+      if (findBody(id)) return solar.position(id, tdb, out);
+      if (isStar(id)) {
+        namedStarPosition(starOf(id), yearsSinceEpoch(tdb), starPc);
+        for (let k = 0; k < 3; k++) starPc[k] *= PC_KM;
+        return icrfToScene(starPc, out);
+      }
+      if (isSmall(id)) return smallAt(id, tdb, out);
+      return positionOf(id, out); // galaxies and black holes stay put
+    },
+    velocity(id, tdb, out = [0, 0, 0]) {
+      if (findBody(id)) return solar.velocity(id, tdb, out);
+      if (isStar(id)) return icrfToScene(starOf(id).vel, out);
+      if (isSmall(id)) {
+        const a = smallAt(id, tdb + 30, [0, 0, 0]), b = smallAt(id, tdb - 30, [0, 0, 0]);
+        for (let k = 0; k < 3; k++) out[k] = (a[k] - b[k]) / 60;
+        return out;
+      }
+      return zero(out);
+    },
+    acceleration(id, tdb, out = [0, 0, 0]) {
+      return findBody(id) ? solar.acceleration(id, tdb, out) : zero(out);
+    },
+    sources(abs, tdb) {
+      const list: Source[] = solar.sources(abs, tdb).map((id) => ({ id, gm: GM[id] }));
+      const years = yearsSinceEpoch(tdb);
+      const icrf = sceneToIcrf(abs, [0, 0, 0]);
+      namedStars.forEach((star, k) => {
+        namedStarPosition(star, years, starPc);
+        const d = Math.hypot(starPc[0] * PC_KM - icrf[0], starPc[1] * PC_KM - icrf[1], starPc[2] * PC_KM - icrf[2]);
+        if (d < 0.05 * PC_KM) list.push({ id: STAR_ID + k, gm: starMass(star) * GM[10] });
+      });
+      for (const t of bhs.targets) {
+        const p = bhs.position(t.id, scratch);
+        if (Math.hypot(p[0] - abs[0], p[1] - abs[1], p[2] - abs[2]) < 10 * PC_KM) {
+          list.push({ id: t.id, gm: bhs.hole(t.id).mass * GM[10], horizon: holeHorizon(t.id) });
+        }
+      }
+      return list;
+    },
+    altitude(id, rel) {
+      const s = surfaces.get(id);
+      if (s) {
+        const [lon, lat, h] = bodyToGeodetic(s.shape, bodyVector(s, rel, scratch));
+        return h - Math.max(s.globe.heightAt(lon, lat), s.globe.heightAt(lon, lat, true)) - 0.002;
+      }
+      const body = findBody(id);
+      if (body) return length(rel) - body.radius[0];
+      if (isStar(id)) return length(rel) - starOf(id).radius * SOLAR_RADIUS;
+      return NaN;
+    },
+    spin(id, tdb) {
+      if (!findBody(id) || !rotationAt(id, tdb, m0)) return undefined;
+      rotationAt(id, tdb + 10, m1);
+      // M1 M0^T = I + [w]x dt for the small turn between them.
+      const r = (i: number, j: number) => m1[i * 3] * m0[j * 3] + m1[i * 3 + 1] * m0[j * 3 + 1] + m1[i * 3 + 2] * m0[j * 3 + 2];
+      return [(r(2, 1) - r(1, 2)) / 20, (r(0, 2) - r(2, 0)) / 20, (r(1, 0) - r(0, 1)) / 20];
+    },
+    radius(id) {
+      if (isHole(id)) return holeHorizon(id);
+      return targets.get(id)?.radius ?? 1;
+    },
+  };
+
+  /** Galaxies and other deep-sky objects don't move: their positions once. */
+  const deepPositions = new Map<number, Vec3>();
+  const deepAt = (id: number) => {
+    let p = deepPositions.get(id);
+    if (!p) deepPositions.set(id, (p = deep.position(id)));
+    return p;
+  };
+
+  /**
+   * What the ship flies relative to: the smallest sphere of influence it is inside (a
+   * moon's, a planet's, the Sun's), else the nearest star or black hole it is near,
+   * else the galaxy (or nebula, or cluster) it is in, else the nearest one.
+   */
+  const chooseRef = (abs: Vec3, tdb: number): number => {
+    let best = -1, bestSize = Infinity;
+    for (const body of BODIES) {
+      if (!solar.has(body.id, tdb)) continue;
+      const infl = solar.influence(body.id, tdb);
+      const p = solar.position(body.id, tdb, scratch);
+      if (infl < bestSize && Math.hypot(p[0] - abs[0], p[1] - abs[1], p[2] - abs[2]) < infl) {
+        best = body.id;
+        bestSize = infl;
+      }
+    }
+    if (best >= 0) return best;
+    const years = yearsSinceEpoch(tdb);
+    const icrf = sceneToIcrf(abs, [0, 0, 0]);
+    namedStars.forEach((star, k) => {
+      namedStarPosition(star, years, starPc);
+      const d = Math.hypot(starPc[0] * PC_KM - icrf[0], starPc[1] * PC_KM - icrf[1], starPc[2] * PC_KM - icrf[2]);
+      const infl = 2e4 * AU * Math.sqrt(starMass(star));
+      if (d < infl && infl < bestSize) {
+        best = STAR_ID + k;
+        bestSize = infl;
+      }
+    });
+    for (const t of bhs.targets) {
+      const p = bhs.position(t.id, scratch);
+      const infl = Math.min(3 * PC_KM, 2e4 * AU * Math.sqrt(bhs.hole(t.id).mass));
+      if (Math.hypot(p[0] - abs[0], p[1] - abs[1], p[2] - abs[2]) < infl && infl < bestSize) {
+        best = t.id;
+        bestSize = infl;
+      }
+    }
+    if (best >= 0) return best;
+    let nearest = -1, nearestRatio = Infinity;
+    for (const t of deep.targets) {
+      const p = deepAt(t.id);
+      const ratio = Math.hypot(p[0] - abs[0], p[1] - abs[1], p[2] - abs[2]) / t.radius;
+      if (ratio < 1.5 && t.radius < bestSize) {
+        best = t.id;
+        bestSize = t.radius;
+      }
+      if (ratio < nearestRatio) {
+        nearest = t.id;
+        nearestRatio = ratio;
+      }
+    }
+    return best >= 0 ? best : nearest >= 0 ? nearest : 10;
+  };
+
+  /** Everything the warp drive slows down for, and the destination. */
+  const warpLimiters = (tdb: number): WarpLimiter[] => {
+    const list: WarpLimiter[] = [];
+    for (const body of BODIES) {
+      if (!solar.has(body.id, tdb)) continue;
+      const r = body.radius[0];
+      list.push({ id: body.id, pos: solar.position(body.id, tdb), radius: r, arrive: body.id === 10 ? 15 * r : r });
+    }
+    const years = yearsSinceEpoch(tdb);
+    namedStars.forEach((star, k) => {
+      const r = star.radius * SOLAR_RADIUS;
+      namedStarPosition(star, years, starPc);
+      for (let c = 0; c < 3; c++) starPc[c] *= PC_KM;
+      list.push({ id: STAR_ID + k, pos: icrfToScene(starPc), radius: r, arrive: 10 * r });
+    });
+    for (const t of bhs.targets) {
+      const rg = bhs.hole(t.id).mass * SUN_GM_KM;
+      list.push({ id: t.id, pos: bhs.position(t.id), radius: holeHorizon(t.id), arrive: 25 * rg });
+    }
+    for (const t of deep.targets) if (t.kind === 'galaxy') list.push({ id: t.id, pos: deepAt(t.id), radius: t.radius, arrive: 0, soft: true });
+    if (flight.target !== undefined && !findBody(flight.target) && !isStar(flight.target) && !isHole(flight.target)) {
+      // Galaxies, nebulae, asteroids and comets: stop at the usual viewing distance.
+      const id = flight.target;
+      const pos = isSmall(id) ? smallAt(id, tdb, [0, 0, 0]) : isDeep(id) ? deepAt(id) : positionOf(id);
+      list.push({ id, pos, radius: 0, arrive: isSmall(id) ? 3000 : viewFor(id).distance });
+    }
+    return list;
+  };
+
+  const controls = new FlightControls({
+    warp: () => toggleWarp(),
+    assist: () => {
+      if (!ship) return;
+      ship.assist = !ship.assist;
+      hud.say(ship.assist ? 'Flight assist on: the ship holds still when you let go' : 'Flight assist off: nothing stops you but your engines');
+    },
+    align: () => {
+      if (flight.target === undefined) hud.say('Pick a destination first: type a name or click a label');
+      else {
+        flight.aligning = true;
+        controls.turned = false;
+      }
+    },
+    jump: () => {
+      if (flight.target === undefined) hud.say('Pick a destination first: type a name or click a label');
+      else jump(flight.target);
+    },
+    exit: () => setFlight(false),
+  });
+  const hud = new FlightHud();
+  const flight = {
+    target: undefined as number | undefined,
+    aligning: false,
+    /** Waiting for an instant trip to finish, to take the controls again. */
+    jumping: undefined as 'start' | 'flying' | undefined,
+    power: Number(params.get('power') ?? 3),
+    assist: params.get('assist') !== '0',
+  };
+  let ship: Ship | undefined;
+  /** Camera direction and up last frame, for taking over the view. */
+  const lastView = { eye: [0, 0, 0] as Vec3, dir: [0, 0, -1] as Vec3, up: [0, 1, 0] as Vec3 };
+  const flyButton = document.createElement('button');
+  flyButton.id = 'fly';
+  flyButton.textContent = 'Pilot a ship';
+  flyButton.title = 'Fly yourself, under real gravity, with a warp drive for the long distances';
+  flyButton.addEventListener('click', () => setFlight(!ship));
+  list.prepend(flyButton);
+
+  const nameOf = (id: number) => targets.get(id)?.name ?? '';
+  const setFlight = (on: boolean) => {
+    (document.activeElement as HTMLElement | null)?.blur?.();
+    if (on && !ship) {
+      tours.stop();
+      const tdb = clock.tdb;
+      const ref = chooseRef(lastView.eye, tdb);
+      const p = flightWorld.position(ref, tdb);
+      ship = new Ship(ref, sub(lastView.eye, p));
+      ship.look(lastView.dir, lastView.up);
+      ship.power = flight.power;
+      ship.assist = flight.assist;
+      ship.stop(flightWorld, tdb);
+      // The ship flies in real time: engines can't push through paused or racing time.
+      clock.paused = false;
+      clock.rate = 1;
+      lookUp = 0;
+      skyAim = undefined;
+      fov = 60;
+      hud.say(`You have the controls, near ${nameOf(ref)}. W to thrust, drag to turn, X for warp. Controls lists the rest.`, 8);
+    } else if (!on && ship) {
+      const eye = ship.position(flightWorld, clock.tdb);
+      const focus = ship.ref;
+      ship = undefined;
+      flight.aligning = false;
+      const frame = frameOf(focus);
+      rig.place(focus, frame, sub(eye, frame.origin));
+      fov = 50;
+    }
+    const active = ship !== undefined;
+    controls.show(active);
+    hud.show(active);
+    flyButton.classList.toggle('active', active);
+    flyButton.textContent = active ? 'Leave the ship' : 'Pilot a ship';
+    document.body.classList.toggle('flying', active);
+  };
+  pick = (id) => {
+    if (!ship) return false;
+    flight.target = id;
+    flight.aligning = false;
+    hud.say(`Destination: ${nameOf(id)}. T turns toward it, X warps there, G jumps straight there.`, 6);
+    return true;
+  };
+  const toggleWarp = () => {
+    if (!ship) return;
+    const tdb = clock.tdb;
+    if (ship.warp.on) {
+      ship.dropWarp(flightWorld, tdb);
+      hud.say('Warp drive off');
+      return;
+    }
+    const blocked = ship.engageWarp(flightWorld, tdb, warpLimiters(tdb), flight.target !== undefined);
+    if (blocked) hud.say(`Too close to ${nameOf(blocked.id)} to warp toward it: turn away or fly out first`);
+    else hud.say(flight.target !== undefined ? `Warp drive on: it slows by itself near anything ahead, and stops at ${nameOf(flight.target)} if you point at it` : 'Warp drive on: W faster, S slower, X to stop');
+  };
+  /** Instant travel from the ship: the usual flight there, then the controls back. */
+  const jump = (id: number) => {
+    setFlight(false);
+    flight.jumping = 'start';
+    flyTo(id);
+  };
+  // Events and tours move the camera themselves: they leave the ship.
+  eventSelect.addEventListener('change', () => setFlight(false), { capture: true });
+  tourSelect.addEventListener('change', () => setFlight(false), { capture: true });
+
+  /** Advance the ship and return the camera for this frame. */
+  const flyShip = (s: Ship, tdbBefore: number, dt: number) => {
+    const tdb = clock.tdb;
+    const take = controls.take();
+    const ppr = innerHeight / (2 * Math.tan((fov * DEG) / 2));
+    if (take.dx || take.dy) s.rotateBody([-take.dy / ppr, -take.dx / ppr, 0]);
+    if (take.wheel) {
+      s.power = Math.min(1e4, Math.max(0.01, s.power * Math.exp(-take.wheel * 0.002)));
+      flight.power = s.power;
+    }
+    flight.assist = s.assist;
+    if (controls.turned) flight.aligning = false;
+    if (flight.aligning && flight.target !== undefined) {
+      const dir = sub(flightWorld.position(flight.target, tdb), s.position(flightWorld, tdb));
+      const d = length(dir);
+      if (s.align([dir[0] / d, dir[1] / d, dir[2] / d], 1.2, dt) < 1e-4 && !s.warp.on) flight.aligning = false;
+    }
+    const input = controls.input(s.warp.on);
+    const limiters = s.warp.on ? warpLimiters(tdb) : [];
+    const events = s.step(flightWorld, tdbBefore, tdb - tdbBefore, dt, input, limiters);
+    for (const e of events) {
+      if (e.kind === 'landed') hud.say(`Landed on ${nameOf(e.id)}`);
+      if (e.kind === 'dropped') hud.say(e.id === flight.target ? `Arrived at ${nameOf(e.id)}` : `Dropped out of warp near ${nameOf(e.id)}`);
+      if (e.kind === 'horizon') {
+        // Nothing comes back out: start again outside, at rest.
+        s.rebase(flightWorld, e.id, tdb);
+        const r = length(s.rel);
+        const rg = bhs.hole(e.id).mass * SUN_GM_KM;
+        for (let k = 0; k < 3; k++) s.rel[k] *= (30 * rg) / Math.max(r, 1e-9);
+        s.warp.on = false;
+        s.stop(flightWorld, tdb);
+        hud.say(`You crossed the event horizon of ${nameOf(e.id)}. Nothing gets back out, so here is a new ship, 30 gravitational radii out.`, 8);
+      }
+    }
+    if (s.landed === undefined) {
+      const abs = s.position(flightWorld, tdb);
+      const ref = chooseRef(abs, tdb);
+      if (ref !== s.ref) s.rebase(flightWorld, ref, tdb);
+    }
+    // Small bodies are not gravity sources: being near the destination is enough.
+    if (flight.target !== undefined && isSmall(flight.target) && !s.warp.on) {
+      const d = length(sub(flightWorld.position(flight.target, tdb), s.position(flightWorld, tdb)));
+      if (d < 5e4) s.rebase(flightWorld, flight.target, tdb);
+    }
+    const eye = s.position(flightWorld, tdb);
+    return { eye, dir: s.forward(), up: s.up() };
+  };
+
   const resize = () => {
     renderer.setSize(innerWidth, innerHeight, false);
     camera.aspect = innerWidth / innerHeight;
@@ -710,6 +1060,86 @@ async function main() {
     }
   };
 
+
+  // ---- the ship's display -----------------------------------------------------
+  const camSpace = new THREE.Vector3();
+  /** Screen point of a direction (scene axes); off screen or behind, pinned to the edge. */
+  const markDir = (name: string, d: Vec3, label = '', always = true) => {
+    camSpace.set(d[0], d[1], d[2]).normalize().transformDirection(camera.matrixWorldInverse);
+    const tanY = Math.tan((camera.fov * DEG) / 2), tanX = tanY * camera.aspect;
+    const front = camSpace.z < 0;
+    let x = front ? camSpace.x / -camSpace.z / tanX : camSpace.x;
+    let y = front ? camSpace.y / -camSpace.z / tanY : camSpace.y;
+    const inside = front && Math.abs(x) < 0.95 && Math.abs(y) < 0.92;
+    if (!inside) {
+      if (!always) return hud.mark(name, 0, 0, false);
+      const k = 1 / Math.max(Math.abs(x) / 0.95, Math.abs(y) / 0.92, 1e-9);
+      x *= k;
+      y *= k;
+    }
+    hud.mark(name, (x * 0.5 + 0.5) * innerWidth, (-y * 0.5 + 0.5) * innerHeight, true, label, !inside);
+  };
+  const updateFlightHud = (s: Ship, eye: Vec3) => {
+    const tdb = clock.tdb;
+    const out: string[] = [];
+    const frameVel = s.frameVelocity(flightWorld, tdb);
+    const v: Vec3 = sub(s.vel, frameVel);
+    const speed = length(v);
+    const refName = nameOf(s.ref);
+    const alt = flightWorld.altitude(s.ref, s.rel, tdb);
+    hud.mark('nose', innerWidth / 2, innerHeight / 2, true);
+    if (s.warp.on) {
+      out.push(`Warp ${formatSpeed(s.warp.speed)}`);
+      if (s.warp.speed >= s.warpCap * 0.98 && s.warp.speed < s.warp.set && s.warpLimiter >= 0) out.push(`Held back by ${nameOf(s.warpLimiter) || 'something ahead'}`);
+      out.push(Number.isFinite(s.warp.set) ? 'W faster, S slower, X to stop' : 'Slows by itself near anything ahead · X to stop');
+      hud.mark('prograde', 0, 0, false);
+      hud.mark('retrograde', 0, 0, false);
+    } else {
+      out.push(`${s.landed !== undefined ? 'Landed' : 'Speed ' + formatSpeed(speed)} relative to ${refName}${length(frameVel) > 0 ? '’s ground' : ''}`);
+      if (speed > 1e-3) {
+        markDir('prograde', v, '', false);
+        markDir('retrograde', [-v[0], -v[1], -v[2]], '', false);
+      } else {
+        hud.mark('prograde', 0, 0, false);
+        hud.mark('retrograde', 0, 0, false);
+      }
+      const gamma = 1 / Math.sqrt(1 - Math.min(0.999999, (length(s.vel) / C_KMS) ** 2));
+      if (gamma > 1.001) out.push(`On board, time runs ${gamma < 10 ? gamma.toFixed(3) : gamma.toFixed(0)}× slower`);
+    }
+    if (Number.isFinite(alt)) {
+      const r = length(s.rel);
+      const climb = (v[0] * s.rel[0] + v[1] * s.rel[1] + v[2] * s.rel[2]) / r;
+      out.push(`Altitude ${formatDistance(Math.max(0, alt))}${s.warp.on || s.landed !== undefined ? '' : climb < -1e-3 ? `, falling ${formatSpeed(-climb)}` : climb > 1e-3 ? `, climbing ${formatSpeed(climb)}` : ''}`);
+      const gm = GM[s.ref];
+      if (gm && !s.warp.on && s.landed === undefined) {
+        const radius = r - alt;
+        const { peri, apo } = apsides(s.rel, s.vel, gm);
+        if (!Number.isFinite(apo)) out.push(`On an escape path from ${refName}`);
+        else if (peri > radius) out.push(`In orbit: ${formatDistance(peri - radius)} × ${formatDistance(apo - radius)}`);
+        else if (apo - radius > 1) out.push(`Falling back: highest point ${formatDistance(apo - radius)}`);
+      }
+    } else if (!s.warp.on) out.push(`${formatDistance(length(s.rel))} from ${refName}`);
+    if (!s.warp.on) {
+      const g = length(s.gravity);
+      if (g > 1e-12) {
+        const ms2 = g * 1000;
+        out.push(`Gravity ${ms2 >= 0.01 ? ms2.toFixed(ms2 < 10 ? 2 : 1) : ms2.toExponential(1)} m/s² (${(g / G0).toPrecision(2)} g), mostly ${nameOf(s.strongest)}`);
+      }
+      out.push(`Engines ${s.power < 1 ? s.power.toPrecision(2) : Math.round(s.power).toLocaleString('en-US')} g · flight assist ${s.assist ? 'on' : 'off'}`);
+      if (clock.paused) out.push('Time is paused: the engines need it running');
+    }
+    if (flight.target !== undefined) {
+      const d = sub(flightWorld.position(flight.target, tdb), eye);
+      const dist = length(d);
+      const closing = s.warp.on ? s.warp.speed * Math.max(0, dot(d, s.forward()) / dist) : -dot(v, d) / dist;
+      const eta = closing > 0 ? dist / closing : Infinity;
+      const surface = findBody(flight.target)?.radius[0] ?? (isStar(flight.target) ? starOf(flight.target).radius * SOLAR_RADIUS : 0);
+      out.push(`→ ${nameOf(flight.target)}: ${formatDistance(Math.max(0, dist - surface))}${Number.isFinite(eta) && eta < 3.15e10 ? `, ${formatDuration(eta)} at this speed` : ''}`);
+      markDir('target', d, nameOf(flight.target));
+    } else hud.mark('target', 0, 0, false);
+    hud.set(out);
+  };
+
   // ---- frame loop -----------------------------------------------------------
   const nameEl = document.getElementById('focus-name')!;
   const detailEl = document.getElementById('focus-detail')!;
@@ -726,6 +1156,7 @@ async function main() {
   const frame = () => {
     const now = performance.now() / 1000;
     const dt = Math.min(0.25, now - last);
+    const tdbBefore = clock.tdb;
     clock.tick(dt);
     last = now;
     frameNumber++;
@@ -733,17 +1164,45 @@ async function main() {
 
     system.update(clock.tdb);
     updateOrientation();
+    hud.tick(now);
+    // Take the controls: on request (?fly=1), or when an instant trip from the ship lands.
+    if (frameNumber === 2 && params.get('fly') === '1') {
+      setFlight(true);
+      if (params.has('target')) flyTo(byName.get(params.get('target')!.toLowerCase()) ?? -1);
+    }
+    if (flight.jumping === 'start' && rig.flying) flight.jumping = 'flying';
+    if (flight.jumping === 'flying' && !rig.flying) {
+      flight.jumping = undefined;
+      flight.target = undefined;
+      setFlight(true);
+    }
+    let eye: Vec3 = [0, 0, 0], target: Vec3 = [0, 0, 0], up: Vec3 = [0, 1, 0];
+    /** In the ship, the direction the camera faces (else it looks at `target`). */
+    let lookDir: Vec3 | undefined;
+    // Near a black hole the camera is placed from the hole itself: its scene position
+    // (hundreds of parsecs out) is far too coarse for a horizon tens of km across.
+    let holeRel: Vec3 | undefined;
+    if (ship) {
+      const view = flyShip(ship, tdbBefore, dt);
+      ({ eye, up } = view);
+      lookDir = view.dir;
+      rig.focus = ship.ref;
+      rig.anchor = undefined;
+      rig.distance = length(ship.rel);
+      if (isHole(ship.ref)) holeRel = [...ship.rel];
+    }
     const focus = targets.get(rig.focus)!;
     rig.minDistance = rig.anchor ? 0.0015 : isDeep(focus.id) ? focus.radius * 0.02 : isHole(focus.id) ? bhs.minDistance(focus.id) : focus.radius * 1.0002;
     tours.update(now, rig.flying);
     adaptResolution(dt);
-    const { eye, target, up, offset } = rig.solve(frameOf, now);
-    // Near a black hole the camera is placed from the hole itself: its scene position
-    // (hundreds of parsecs out) is far too coarse for a horizon tens of km across.
-    let holeRel: Vec3 | undefined;
-    if (isHole(rig.focus)) {
-      const c = bhs.position(rig.focus);
-      holeRel = [offset[0] + (target[0] - c[0]), offset[1] + (target[1] - c[1]), offset[2] + (target[2] - c[2])];
+    if (!ship) {
+      const solved = rig.solve(frameOf, now);
+      ({ eye, target, up } = solved);
+      const offset = solved.offset;
+      if (isHole(rig.focus)) {
+        const c = bhs.position(rig.focus);
+        holeRel = [offset[0] + (target[0] - c[0]), offset[1] + (target[1] - c[1]), offset[2] + (target[2] - c[2])];
+      }
     }
 
     // Keep the camera above the ground on bodies with terrain.
@@ -786,7 +1245,8 @@ async function main() {
     }
 
     // Floating origin: the camera sits at the three.js origin; the world moves around it.
-    sub(target, eye, rel);
+    if (lookDir) [rel[0], rel[1], rel[2]] = lookDir;
+    else sub(target, eye, rel);
     let viewUp: Vec3 = up;
     if (lookUp !== 0) {
       // Tilt the line of sight up about the camera's right axis (from the ground, to the sky).
@@ -807,6 +1267,10 @@ async function main() {
     camera.position.set(0, 0, 0);
     camera.up.set(viewUp[0], viewUp[1], viewUp[2]);
     camera.lookAt(rel[0], rel[1], rel[2]);
+    const relLen = length(rel);
+    lastView.eye = [...eye];
+    lastView.dir = [rel[0] / relLen, rel[1] / relLen, rel[2] / relLen];
+    lastView.up = [...viewUp];
     camera.updateProjectionMatrix();
     camera.updateMatrixWorld();
     frustum.setFromProjectionMatrix(projView.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
@@ -896,12 +1360,16 @@ async function main() {
     // Exposure follows the eye: sunlit ground at the focus body's distance from the Sun
     // looks the same everywhere, the Sun's own surface is shown at a readable level up
     // close, and the eye opens up in the dark of totality.
-    const fromSun = length(sub(positionOf(rig.focus), sunPos, [0, 0, 0]));
-    let exposureTarget = rig.focus === 10 ? 0.6 / (7 * 46200) : Math.min(2500, Math.max(0.15, (fromSun / AU) ** 2));
+    // In the ship, the light where the ship is; the Sun's surface only from close by.
+    const fromSun = length(sub(ship ? eye : positionOf(rig.focus), sunPos, [0, 0, 0]));
+    const sunUpClose = rig.focus === 10 && (!ship || rig.distance < 30 * SUN_RADIUS);
+    let exposureTarget = sunUpClose ? 0.6 / (7 * 46200) : Math.min(2500, Math.max(0.15, (fromSun / AU) ** 2));
     // Like the eye, adapt to the body in view: bright clouds and ice get less exposure,
     // dark rock more (Earth and the Moon keep the exposure their maps were made for).
     const focusBody = findBody(rig.focus);
-    if (focusBody && !surfaces.has(focusBody.id) && focusBody.id !== 10) exposureTarget *= Math.min(2, Math.max(0.2, 0.11 / focusBody.albedo));
+    if (focusBody && !surfaces.has(focusBody.id) && focusBody.id !== 10 && (!ship || rig.distance < 30 * focusBody.radius[0])) {
+      exposureTarget *= Math.min(2, Math.max(0.2, 0.11 / focusBody.albedo));
+    }
     // In another body's shadow (totality, a lunar eclipse) the eye adapts to the dark.
     exposureTarget *= 1 + 12 * (1 - Math.min(1, sunVisibleOthers * 30));
     const k = 1 - Math.exp(-dt * 2.5);
@@ -1103,6 +1571,7 @@ async function main() {
       label.style.display = show ? '' : 'none';
     }
 
+    if (ship) updateFlightHud(ship, eye);
     const lines: string[] = [];
     const s = surfaces.get(rig.focus);
     if (s) {
@@ -1223,6 +1692,24 @@ async function loadDust(base: string): Promise<DustGrid> {
   const lo = n.map((_, a) => meta.lo[a] - cell[a] / 2) as Vec3;
   const size = n.map((k, a) => cell[a] * k) as Vec3;
   return { texture, lo, size, scale: meta.scale };
+}
+
+const LIGHT_YEAR_KM = 9460730472580.8;
+function formatSpeed(kms: number): string {
+  if (kms < 1) return `${(kms * 1000).toFixed(kms < 0.01 ? 2 : kms < 0.1 ? 1 : 0)} m/s`;
+  if (kms < 0.05 * 299792.458) return `${kms.toLocaleString('en-US', { maximumFractionDigits: kms < 10 ? 2 : 0 })} km/s`;
+  const c = kms / 299792.458;
+  if (c < 3e5) return `${c < 10 ? c.toFixed(2) : Math.round(c).toLocaleString('en-US')} × light speed`;
+  const ly = kms / LIGHT_YEAR_KM;
+  return `${ly < 1e6 ? ly.toPrecision(3) : ly.toExponential(2)} light years a second`;
+}
+
+function formatDuration(s: number): string {
+  if (s < 90) return `${s.toFixed(0)} s`;
+  if (s < 5400) return `${(s / 60).toFixed(0)} min`;
+  if (s < 2 * 86400) return `${(s / 3600).toFixed(1)} h`;
+  if (s < 2 * 365.25 * 86400) return `${(s / 86400).toFixed(0)} days`;
+  return `${(s / (365.25 * 86400)).toPrecision(3)} years`;
 }
 
 function formatLightTime(km: number): string {
