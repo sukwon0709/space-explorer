@@ -1,0 +1,1384 @@
+{
+ "source": "DSS2 colour (POSS-II, UKSTU) via CDS hips2fits; foreground stars removed with Gaia DR3",
+ "images": [
+  {
+   "name": "Andromeda Galaxy",
+   "kind": "galaxy",
+   "ra": 10.685416681809256,
+   "dec": 41.26916532388382,
+   "fov": 3.73863450735062,
+   "file": "andromeda-galaxy.jpg",
+   "mean": [
+    0.015421,
+    0.01495,
+    0.015079
+   ],
+   "masked": 15313
+  },
+  {
+   "name": "Triangulum Galaxy",
+   "kind": "galaxy",
+   "ra": 23.461667493580883,
+   "dec": 30.6602789333623,
+   "fov": 1.4010709188282022,
+   "file": "triangulum-galaxy.jpg",
+   "mean": [
+    0.013611,
+    0.013354,
+    0.013356
+   ],
+   "masked": 1211
+  },
+  {
+   "name": "Large Magellanic Cloud",
+   "kind": "galaxy",
+   "ra": 80.89416628526885,
+   "dec": -69.75611249547137,
+   "fov": 12.887121283245172,
+   "file": "large-magellanic-cloud.jpg",
+   "mean": [
+    0.006267,
+    0.007571,
+    0.009421
+   ],
+   "masked": 25211
+  },
+  {
+   "name": "Small Magellanic Cloud",
+   "kind": "galaxy",
+   "ra": 13.15833315343462,
+   "dec": -72.80027657261385,
+   "fov": 7.6028384777655065,
+   "file": "small-magellanic-cloud.jpg",
+   "mean": [
+    0.003659,
+    0.008304,
+    0.015641
+   ],
+   "masked": 9462
+  },
+  {
+   "name": "Sculptor Galaxy",
+   "kind": "galaxy",
+   "ra": 11.892916735359947,
+   "dec": -25.292221692238954,
+   "fov": 0.731223217629079,
+   "file": "sculptor-galaxy.jpg",
+   "mean": [
+    0.016665,
+    0.019675,
+    0.023803
+   ],
+   "masked": 412
+  },
+  {
+   "name": "Bode's Galaxy",
+   "kind": "galaxy",
+   "ra": 148.889583333804,
+   "dec": 69.06666664866523,
+   "fov": 0.561831508628696,
+   "file": "bode-s-galaxy.jpg",
+   "mean": [
+    0.018338,
+    0.01896,
+    0.020088
+   ],
+   "masked": 382
+  },
+  {
+   "name": "Cigar Galaxy",
+   "kind": "galaxy",
+   "ra": 148.97458447238387,
+   "dec": 69.68249956970686,
+   "fov": 0.22999966343098782,
+   "file": "cigar-galaxy.jpg",
+   "mean": [
+    0.032521,
+    0.032813,
+    0.03348
+   ],
+   "masked": 91
+  },
+  {
+   "name": "Whirlpool Galaxy",
+   "kind": "galaxy",
+   "ra": 202.46958303720712,
+   "dec": 47.23444531184126,
+   "fov": 0.3179912530898132,
+   "includes": [
+    "NGC 5195"
+   ],
+   "file": "whirlpool-galaxy.jpg",
+   "mean": [
+    0.047592,
+    0.04541,
+    0.043718
+   ],
+   "masked": 142
+  },
+  {
+   "name": "Pinwheel Galaxy",
+   "kind": "galaxy",
+   "ra": 210.80333292227482,
+   "dec": 54.35055512596283,
+   "fov": 0.5959291611824257,
+   "file": "pinwheel-galaxy.jpg",
+   "mean": [
+    0.010229,
+    0.011576,
+    0.013336
+   ],
+   "masked": 301
+  },
+  {
+   "name": "Sombrero Galaxy",
+   "kind": "galaxy",
+   "ra": 189.99624957935234,
+   "dec": -11.62305535386482,
+   "fov": 0.23712389115082982,
+   "file": "sombrero-galaxy.jpg",
+   "mean": [
+    0.052562,
+    0.042132,
+    0.033408
+   ],
+   "masked": 130
+  },
+  {
+   "name": "Southern Pinwheel Galaxy",
+   "kind": "galaxy",
+   "ra": 204.25041594240633,
+   "dec": -29.867777569094002,
+   "fov": 0.3695616823527112,
+   "file": "southern-pinwheel-galaxy.jpg",
+   "mean": [
+    0.068143,
+    0.066438,
+    0.066146
+   ],
+   "masked": 890
+  },
+  {
+   "name": "Centaurus A",
+   "kind": "galaxy",
+   "ra": 201.37041611722265,
+   "dec": -43.016666710703426,
+   "fov": 0.6931049663271188,
+   "file": "centaurus-a.jpg",
+   "mean": [
+    0.026921,
+    0.022841,
+    0.019307
+   ],
+   "masked": 2847
+  },
+  {
+   "name": "M87 (Virgo A)",
+   "kind": "galaxy",
+   "ra": 187.7057996534142,
+   "dec": 12.391200115796025,
+   "fov": 0.1805403408215904,
+   "file": "m87-virgo-a.jpg",
+   "mean": [
+    0.043604,
+    0.035855,
+    0.029182
+   ],
+   "masked": 47
+  },
+  {
+   "name": "Black Eye Galaxy",
+   "kind": "galaxy",
+   "ra": 194.1841666083252,
+   "dec": 21.684721529199816,
+   "fov": 0.2727582347940895,
+   "file": "black-eye-galaxy.jpg",
+   "mean": [
+    0.038176,
+    0.038162,
+    0.038162
+   ],
+   "masked": 89
+  },
+  {
+   "name": "Sunflower Galaxy",
+   "kind": "galaxy",
+   "ra": 198.95541689007794,
+   "dec": 42.02916715241006,
+   "fov": 0.3208719654660328,
+   "file": "sunflower-galaxy.jpg",
+   "mean": [
+    0.022858,
+    0.021393,
+    0.020002
+   ],
+   "masked": 118
+  },
+  {
+   "name": "M106",
+   "kind": "galaxy",
+   "ra": 184.7395831596308,
+   "dec": 47.30388861931782,
+   "fov": 0.368302348856073,
+   "file": "m106.jpg",
+   "mean": [
+    0.027457,
+    0.022481,
+    0.018179
+   ],
+   "masked": 143
+  },
+  {
+   "name": "NGC 300",
+   "kind": "galaxy",
+   "ra": 13.7229170873433,
+   "dec": -37.68249897472132,
+   "fov": 0.5131539977047475,
+   "file": "ngc-300.jpg",
+   "mean": [
+    0.007335,
+    0.012038,
+    0.018668
+   ],
+   "masked": 186
+  },
+  {
+   "name": "NGC 55",
+   "kind": "galaxy",
+   "ra": 3.7854167649222865,
+   "dec": -39.220277685077484,
+   "fov": 0.7316517468215753,
+   "file": "ngc-55.jpg",
+   "mean": [
+    0.003008,
+    0.003361,
+    0.004105
+   ],
+   "masked": 397
+  },
+  {
+   "name": "M74",
+   "kind": "galaxy",
+   "ra": 24.172082417237768,
+   "dec": 15.786666156213768,
+   "fov": 0.22181593194106752,
+   "file": "m74.jpg",
+   "mean": [
+    0.023489,
+    0.018559,
+    0.014786
+   ],
+   "masked": 94
+  },
+  {
+   "name": "M77",
+   "kind": "galaxy",
+   "ra": 40.66987952140022,
+   "dec": -0.0132900000476378,
+   "fov": 0.13726204039437015,
+   "file": "m77.jpg",
+   "mean": [
+    0.068106,
+    0.053218,
+    0.041499
+   ],
+   "masked": 34
+  },
+  {
+   "name": "M66",
+   "kind": "galaxy",
+   "ra": 170.06250055674903,
+   "dec": 12.991388151100388,
+   "fov": 0.20649247747247,
+   "file": "m66.jpg",
+   "mean": [
+    0.042873,
+    0.040448,
+    0.038519
+   ],
+   "masked": 62
+  },
+  {
+   "name": "M65",
+   "kind": "galaxy",
+   "ra": 169.73269974716825,
+   "dec": 13.09290044515185,
+   "fov": 0.16566118811969677,
+   "file": "m65.jpg",
+   "mean": [
+    0.04898,
+    0.042722,
+    0.037226
+   ],
+   "masked": 48
+  },
+  {
+   "name": "Needle Galaxy",
+   "kind": "galaxy",
+   "ra": 189.08650018496184,
+   "dec": 25.987199397899424,
+   "fov": 0.27867292548128636,
+   "file": "needle-galaxy.jpg",
+   "mean": [
+    0.011153,
+    0.008706,
+    0.006679
+   ],
+   "masked": 98
+  },
+  {
+   "name": "NGC 891",
+   "kind": "galaxy",
+   "ra": 35.636664398085834,
+   "dec": 42.34666540496382,
+   "fov": 0.2631970979093147,
+   "file": "ngc-891.jpg",
+   "mean": [
+    0.020876,
+    0.013427,
+    0.008011
+   ],
+   "masked": 437
+  },
+  {
+   "name": "NGC 2403",
+   "kind": "galaxy",
+   "ra": 114.21416603630036,
+   "dec": 65.59944351101565,
+   "fov": 0.571527322864913,
+   "file": "ngc-2403.jpg",
+   "mean": [
+    0.007885,
+    0.007295,
+    0.006969
+   ],
+   "masked": 662
+  },
+  {
+   "name": "M94",
+   "kind": "galaxy",
+   "ra": 192.72291681234074,
+   "dec": 41.1194427808728,
+   "fov": 0.29824377290750004,
+   "file": "m94.jpg",
+   "mean": [
+    0.030094,
+    0.02474,
+    0.020285
+   ],
+   "masked": 118
+  },
+  {
+   "name": "IC 342",
+   "kind": "galaxy",
+   "ra": 56.70375021899158,
+   "dec": 68.095832899768,
+   "fov": 0.42357897849637255,
+   "file": "ic-342.jpg",
+   "mean": [
+    0.007569,
+    0.006296,
+    0.005171
+   ],
+   "masked": 875
+  },
+  {
+   "name": "NGC 6946",
+   "kind": "galaxy",
+   "ra": 308.71291725838756,
+   "dec": 60.15416727542737,
+   "fov": 0.2971493898077568,
+   "file": "ngc-6946.jpg",
+   "mean": [
+    0.020834,
+    0.016428,
+    0.01272
+   ],
+   "masked": 1562
+  },
+  {
+   "name": "M49",
+   "kind": "galaxy",
+   "ra": 187.44499999155067,
+   "dec": 8.000399916652224,
+   "fov": 0.21872961967869464,
+   "file": "m49.jpg",
+   "mean": [
+    0.036969,
+    0.034102,
+    0.031354
+   ],
+   "masked": 69
+  },
+  {
+   "name": "M86",
+   "kind": "galaxy",
+   "ra": 186.5492197621642,
+   "dec": 12.945969470942442,
+   "fov": 0.21306997364769856,
+   "file": "m86.jpg",
+   "mean": [
+    0.017768,
+    0.019065,
+    0.021248
+   ],
+   "masked": 74
+  },
+  {
+   "name": "M84",
+   "kind": "galaxy",
+   "ra": 186.26519962790647,
+   "dec": 12.887099896463704,
+   "fov": 0.12781277183716078,
+   "file": "m84.jpg",
+   "mean": [
+    0.038293,
+    0.038338,
+    0.039538
+   ],
+   "masked": 26
+  },
+  {
+   "name": "M60",
+   "kind": "galaxy",
+   "ra": 190.91689937481794,
+   "dec": 11.552699365109135,
+   "fov": 0.1609067471246737,
+   "file": "m60.jpg",
+   "mean": [
+    0.053684,
+    0.044664,
+    0.036816
+   ],
+   "masked": 37
+  },
+  {
+   "name": "Fornax A",
+   "kind": "galaxy",
+   "ra": 50.67389913475696,
+   "dec": -37.20819884496284,
+   "fov": 0.2648177034280296,
+   "file": "fornax-a.jpg",
+   "mean": [
+    0.031122,
+    0.029159,
+    0.027385
+   ],
+   "masked": 109
+  },
+  {
+   "name": "NGC 1365",
+   "kind": "galaxy",
+   "ra": 53.40160138461874,
+   "dec": -36.14050129428942,
+   "fov": 0.2159280512702265,
+   "file": "ngc-1365.jpg",
+   "mean": [
+    0.001664,
+    0.007592,
+    0.019293
+   ],
+   "masked": 79
+  },
+  {
+   "name": "NGC 1399",
+   "kind": "galaxy",
+   "ra": 54.621201028144434,
+   "dec": -35.450599645444306,
+   "fov": 0.14891793821451285,
+   "file": "ngc-1399.jpg",
+   "mean": [
+    0.018692,
+    0.036992,
+    0.068709
+   ],
+   "masked": 39
+  },
+  {
+   "name": "Whale Galaxy",
+   "kind": "galaxy",
+   "ra": 190.5333331946275,
+   "dec": 32.54138835084193,
+   "fov": 0.3351155893566881,
+   "file": "whale-galaxy.jpg",
+   "mean": [
+    0.011836,
+    0.013145,
+    0.015016
+   ],
+   "masked": 139
+  },
+  {
+   "name": "M108",
+   "kind": "galaxy",
+   "ra": 167.87916652748183,
+   "dec": 55.67389004596591,
+   "fov": 0.0995148311727111,
+   "file": "m108.jpg",
+   "mean": [
+    0.06324,
+    0.054896,
+    0.047791
+   ],
+   "masked": 14
+  },
+  {
+   "name": "M109",
+   "kind": "galaxy",
+   "ra": 179.39970002950201,
+   "dec": 53.374499980784734,
+   "fov": 0.1441576545870748,
+   "file": "m109.jpg",
+   "mean": [
+    0.020853,
+    0.02207,
+    0.0237
+   ],
+   "masked": 30
+  },
+  {
+   "name": "NGC 7331",
+   "kind": "galaxy",
+   "ra": 339.26709039900896,
+   "dec": 34.41592091224993,
+   "fov": 0.21084625617905223,
+   "file": "ngc-7331.jpg",
+   "mean": [
+    0.02337,
+    0.019452,
+    0.016062
+   ],
+   "masked": 345
+  },
+  {
+   "name": "NGC 2903",
+   "kind": "galaxy",
+   "ra": 143.04000201486764,
+   "dec": 21.50055600891188,
+   "fov": 0.24859261750629233,
+   "file": "ngc-2903.jpg",
+   "mean": [
+    0.018558,
+    0.022027,
+    0.026186
+   ],
+   "masked": 109
+  },
+  {
+   "name": "M100",
+   "kind": "galaxy",
+   "ra": 185.72873963929925,
+   "dec": 15.822379214865823,
+   "fov": 0.14892509837268766,
+   "file": "m100.jpg",
+   "mean": [
+    0.021557,
+    0.030197,
+    0.041652
+   ],
+   "masked": 33
+  },
+  {
+   "name": "M61",
+   "kind": "galaxy",
+   "ra": 185.47896003451544,
+   "dec": 4.473590165133172,
+   "fov": 0.12146324110886308,
+   "file": "m61.jpg",
+   "mean": [
+    0.040029,
+    0.048022,
+    0.057618
+   ],
+   "masked": 18
+  },
+  {
+   "name": "M99",
+   "kind": "galaxy",
+   "ra": 184.7067697017982,
+   "dec": 14.416488975855984,
+   "fov": 0.10333518189390373,
+   "file": "m99.jpg",
+   "mean": [
+    0.045455,
+    0.056273,
+    0.071168
+   ],
+   "masked": 12
+  },
+  {
+   "name": "M88",
+   "kind": "galaxy",
+   "ra": 187.99689958480212,
+   "dec": 14.420099476833418,
+   "fov": 0.15296884400062213,
+   "file": "m88.jpg",
+   "mean": [
+    0.038069,
+    0.03767,
+    0.037888
+   ],
+   "masked": 26
+  },
+  {
+   "name": "M90",
+   "kind": "galaxy",
+   "ra": 189.2075704823213,
+   "dec": 13.162870000403394,
+   "fov": 0.19827554976630396,
+   "file": "m90.jpg",
+   "mean": [
+    0.021682,
+    0.023178,
+    0.025234
+   ],
+   "masked": 61
+  },
+  {
+   "name": "M58",
+   "kind": "galaxy",
+   "ra": 189.43140053565077,
+   "dec": 11.817999853346056,
+   "fov": 0.11253034880501017,
+   "file": "m58.jpg",
+   "mean": [
+    0.05619,
+    0.048762,
+    0.042149
+   ],
+   "masked": 10
+  },
+  {
+   "name": "M95",
+   "kind": "galaxy",
+   "ra": 160.9904165733103,
+   "dec": 11.703610689179111,
+   "fov": 0.1438930492417911,
+   "file": "m95.jpg",
+   "mean": [
+    0.033015,
+    0.026318,
+    0.020992
+   ],
+   "masked": 35
+  },
+  {
+   "name": "M96",
+   "kind": "galaxy",
+   "ra": 161.69083204011991,
+   "dec": 11.819722766260643,
+   "fov": 0.18157028083153212,
+   "file": "m96.jpg",
+   "mean": [
+    0.033397,
+    0.026231,
+    0.020385
+   ],
+   "masked": 43
+  },
+  {
+   "name": "M105",
+   "kind": "galaxy",
+   "ra": 161.9566667279178,
+   "dec": 12.581666706400716,
+   "fov": 0.10868956000378718,
+   "file": "m105.jpg",
+   "mean": [
+    0.076905,
+    0.062433,
+    0.050321
+   ],
+   "masked": 17
+  },
+  {
+   "name": "NGC 3115",
+   "kind": "galaxy",
+   "ra": 151.3083337154414,
+   "dec": -7.718611043501449,
+   "fov": 0.1696661492542783,
+   "file": "ngc-3115.jpg",
+   "mean": [
+    0.060695,
+    0.047181,
+    0.036005
+   ],
+   "masked": 69
+  },
+  {
+   "name": "NGC 4945",
+   "kind": "galaxy",
+   "ra": 196.35874958709314,
+   "dec": -49.471110069299556,
+   "fov": 0.557717330051944,
+   "file": "ngc-4945.jpg",
+   "mean": [
+    0.013533,
+    0.013465,
+    0.013737
+   ],
+   "masked": 2989
+  },
+  {
+   "name": "NGC 1300",
+   "kind": "galaxy",
+   "ra": 49.92129988028583,
+   "dec": -19.41109971523087,
+   "fov": 0.12141934147231401,
+   "file": "ngc-1300.jpg",
+   "mean": [
+    0.042549,
+    0.033467,
+    0.025949
+   ],
+   "masked": 22
+  },
+  {
+   "name": "NGC 1097",
+   "kind": "galaxy",
+   "ra": 41.57950185464682,
+   "dec": -30.275000613068315,
+   "fov": 0.19899355479550004,
+   "file": "ngc-1097.jpg",
+   "mean": [
+    0.049609,
+    0.047611,
+    0.046269
+   ],
+   "masked": 60
+  },
+  {
+   "name": "NGC 2997",
+   "kind": "galaxy",
+   "ra": 146.41164061276734,
+   "dec": -31.191089386978998,
+   "fov": 0.19282884196016767,
+   "file": "ngc-2997.jpg",
+   "mean": [
+    0.023672,
+    0.025955,
+    0.029104
+   ],
+   "masked": 328
+  },
+  {
+   "name": "NGC 7793",
+   "kind": "galaxy",
+   "ra": 359.4558333429235,
+   "dec": -32.589999784804725,
+   "fov": 0.282292634432365,
+   "file": "ngc-7793.jpg",
+   "mean": [
+    0.032614,
+    0.029936,
+    0.027477
+   ],
+   "masked": 99
+  },
+  {
+   "name": "NGC 247",
+   "kind": "galaxy",
+   "ra": 11.784583297052565,
+   "dec": -20.759999332364867,
+   "fov": 0.4979915974493766,
+   "file": "ngc-247.jpg",
+   "mean": [
+    0.006587,
+    0.005217,
+    0.004086
+   ],
+   "masked": 174
+  },
+  {
+   "name": "NGC 4449",
+   "kind": "galaxy",
+   "ra": 187.04666664958543,
+   "dec": 44.09444644039113,
+   "fov": 0.13655049193766228,
+   "file": "ngc-4449.jpg",
+   "mean": [
+    0.027474,
+    0.043714,
+    0.067516
+   ],
+   "masked": 23
+  },
+  {
+   "name": "M110",
+   "kind": "galaxy",
+   "ra": 10.093750008124216,
+   "dec": 41.68638895644869,
+   "fov": 0.3837366003565105,
+   "file": "m110.jpg",
+   "mean": [
+    0.026887,
+    0.025553,
+    0.024842
+   ],
+   "masked": 805
+  },
+  {
+   "name": "M32",
+   "kind": "galaxy",
+   "ra": 10.675416336634406,
+   "dec": 40.86638952841811,
+   "fov": 0.18097364591887813,
+   "file": "m32.jpg",
+   "mean": [
+    0.078425,
+    0.076232,
+    0.075425
+   ],
+   "masked": 176
+  },
+  {
+   "name": "Barnard's Galaxy",
+   "kind": "galaxy",
+   "ra": 296.2404170549773,
+   "dec": -14.803055873596763,
+   "fov": 0.3774602461017641,
+   "file": "barnard-s-galaxy.jpg",
+   "mean": [
+    0.010269,
+    0.009012,
+    0.007821
+   ],
+   "masked": 2342
+  },
+  {
+   "name": "Orion Nebula",
+   "aka": [
+    "M42",
+    "NGC 1976"
+   ],
+   "kind": "emission",
+   "ra": 83.82208333333332,
+   "dec": -5.391111111111112,
+   "fov": 1.4,
+   "dist": 390,
+   "source": "Gaia DR2, Kounkel et al. 2018",
+   "V": 4.0,
+   "file": "orion-nebula.jpg",
+   "mean": [
+    0.181038,
+    0.126393,
+    0.084306
+   ],
+   "masked": 1473
+  },
+  {
+   "name": "Trifid Nebula",
+   "aka": [
+    "M20",
+    "NGC 6514"
+   ],
+   "kind": "emission",
+   "ra": 270.59583333333336,
+   "dec": -23.029999999999998,
+   "fov": 0.6,
+   "dist": 1200,
+   "source": "Gaia DR2, Kuhn et al. 2019",
+   "V": 6.3,
+   "file": "trifid-nebula.jpg",
+   "mean": [
+    0.090631,
+    0.0957,
+    0.110344
+   ],
+   "masked": 7348
+  },
+  {
+   "name": "Eagle Nebula",
+   "aka": [
+    "M16",
+    "NGC 6611",
+    "Pillars of Creation"
+   ],
+   "kind": "emission",
+   "ra": 274.7,
+   "dec": -13.816666666666666,
+   "fov": 0.7,
+   "dist": 1740,
+   "source": "Gaia DR2, Kuhn et al. 2019",
+   "V": 6.0,
+   "file": "eagle-nebula.jpg",
+   "mean": [
+    0.174072,
+    0.078482,
+    0.025917
+   ],
+   "masked": 6261
+  },
+  {
+   "name": "Omega Nebula",
+   "aka": [
+    "M17",
+    "Swan Nebula",
+    "NGC 6618"
+   ],
+   "kind": "emission",
+   "ra": 275.1083333333333,
+   "dec": -16.17666666666667,
+   "fov": 0.7,
+   "dist": 1680,
+   "source": "Gaia DR2, Kuhn et al. 2019",
+   "V": 6.0,
+   "file": "omega-nebula.jpg",
+   "mean": [
+    0.143997,
+    0.071102,
+    0.029476
+   ],
+   "masked": 8873
+  },
+  {
+   "name": "Carina Nebula",
+   "aka": [
+    "NGC 3372",
+    "Eta Carinae Nebula"
+   ],
+   "kind": "emission",
+   "ra": 161.28333333333333,
+   "dec": -59.867777777777775,
+   "fov": 2.6,
+   "dist": 2350,
+   "source": "Gaia DR2, G\u00f6ppl and Preibisch 2022",
+   "V": 3.0,
+   "file": "carina-nebula.jpg",
+   "mean": [
+    0.197887,
+    0.139876,
+    0.093531
+   ],
+   "masked": 41338
+  },
+  {
+   "name": "Rosette Nebula",
+   "aka": [
+    "NGC 2237",
+    "Caldwell 49"
+   ],
+   "kind": "emission",
+   "ra": 98.4375,
+   "dec": 4.998333333333333,
+   "fov": 1.6,
+   "dist": 1550,
+   "source": "Gaia DR2, Kuhn et al. 2019",
+   "V": 6.0,
+   "file": "rosette-nebula.jpg",
+   "mean": [
+    0.055104,
+    0.029516,
+    0.012734
+   ],
+   "masked": 5657
+  },
+  {
+   "name": "Helix Nebula",
+   "aka": [
+    "NGC 7293"
+   ],
+   "kind": "planetary nebula",
+   "ra": 337.41041666666666,
+   "dec": -20.83722222222222,
+   "fov": 0.45,
+   "dist": 200,
+   "source": "Gaia EDR3 central star",
+   "V": 7.6,
+   "file": "helix-nebula.jpg",
+   "mean": [
+    0.025318,
+    0.053851,
+    0.100391
+   ],
+   "masked": 254
+  },
+  {
+   "name": "Ring Nebula",
+   "aka": [
+    "M57",
+    "NGC 6720"
+   ],
+   "kind": "planetary nebula",
+   "ra": 283.39625,
+   "dec": 33.02916666666667,
+   "fov": 0.07,
+   "dist": 790,
+   "source": "Gaia EDR3 central star",
+   "V": 8.8,
+   "file": "ring-nebula.jpg",
+   "mean": [
+    0.090371,
+    0.085377,
+    0.081303
+   ],
+   "masked": 93
+  },
+  {
+   "name": "Dumbbell Nebula",
+   "aka": [
+    "M27",
+    "NGC 6853"
+   ],
+   "kind": "planetary nebula",
+   "ra": 299.90125,
+   "dec": 22.72111111111111,
+   "fov": 0.2,
+   "dist": 390,
+   "source": "Gaia EDR3 central star",
+   "V": 7.5,
+   "file": "dumbbell-nebula.jpg",
+   "mean": [
+    0.16585,
+    0.175764,
+    0.189824
+   ],
+   "masked": 2446
+  },
+  {
+   "name": "Crab Nebula",
+   "aka": [
+    "M1",
+    "NGC 1952"
+   ],
+   "kind": "supernova remnant",
+   "ra": 83.63291666666666,
+   "dec": 22.014444444444443,
+   "fov": 0.15,
+   "dist": 2000,
+   "source": "Trimble 1973",
+   "V": 8.4,
+   "file": "crab-nebula.jpg",
+   "mean": [
+    0.13784,
+    0.109573,
+    0.087513
+   ],
+   "masked": 209
+  },
+  {
+   "name": "Pleiades nebulosity",
+   "aka": [
+    "Merope Nebula",
+    "NGC 1435"
+   ],
+   "kind": "reflection",
+   "ra": 56.625,
+   "dec": 24.0,
+   "fov": 1.8,
+   "dist": 136,
+   "source": "Gaia DR2 cluster parallax",
+   "V": 8.0,
+   "file": "pleiades-nebulosity.jpg",
+   "mean": [
+    0.006219,
+    0.040442,
+    0.111064
+   ],
+   "masked": 2649
+  },
+  {
+   "name": "Horsehead Nebula",
+   "aka": [
+    "Barnard 33",
+    "IC 434",
+    "Flame Nebula",
+    "NGC 2024"
+   ],
+   "kind": "emission",
+   "ra": 85.25,
+   "dec": -2.3,
+   "fov": 1.3,
+   "dist": 400,
+   "source": "Gaia DR2, Zucker et al. 2019",
+   "V": 7.3,
+   "file": "horsehead-nebula.jpg",
+   "mean": [
+    0.058599,
+    0.054503,
+    0.056335
+   ],
+   "masked": 3410
+  },
+  {
+   "name": "Heart Nebula",
+   "aka": [
+    "IC 1805"
+   ],
+   "kind": "emission",
+   "ra": 38.175,
+   "dec": 61.45,
+   "fov": 2.4,
+   "dist": 2100,
+   "source": "Gaia DR2",
+   "V": 6.5,
+   "file": "heart-nebula.jpg",
+   "mean": [
+    0.014199,
+    0.007418,
+    0.003148
+   ],
+   "masked": 12534
+  },
+  {
+   "name": "Lagoon Nebula",
+   "aka": [
+    "M8",
+    "NGC 6523"
+   ],
+   "kind": "emission",
+   "ra": 270.90416666666664,
+   "dec": -24.386666666666667,
+   "fov": 1.6,
+   "dist": 1250,
+   "source": "Gaia DR2, Damiani et al. 2019",
+   "V": 6.0,
+   "file": "lagoon-nebula.jpg",
+   "mean": [
+    0.105024,
+    0.088001,
+    0.073411
+   ],
+   "masked": 2991
+  },
+  {
+   "name": "North America Nebula",
+   "aka": [
+    "NGC 7000",
+    "Pelican Nebula",
+    "IC 5070"
+   ],
+   "kind": "emission",
+   "ra": 313.75,
+   "dec": 44.333333333333336,
+   "fov": 3.2,
+   "dist": 795,
+   "source": "Gaia DR2, Kuhn et al. 2020",
+   "V": 4.0,
+   "file": "north-america-nebula.jpg",
+   "mean": [
+    0.049223,
+    0.026076,
+    0.011322
+   ],
+   "masked": 2541
+  },
+  {
+   "name": "Veil Nebula",
+   "aka": [
+    "Cygnus Loop",
+    "NGC 6960",
+    "NGC 6992"
+   ],
+   "kind": "supernova remnant",
+   "ra": 312.75,
+   "dec": 30.666666666666668,
+   "fov": 3.6,
+   "dist": 735,
+   "source": "Fesen et al. 2021",
+   "V": 7.0,
+   "file": "veil-nebula.jpg",
+   "mean": [
+    0.006122,
+    0.003863,
+    0.002574
+   ],
+   "masked": 2815
+  },
+  {
+   "name": "Soul Nebula",
+   "aka": [
+    "IC 1848"
+   ],
+   "kind": "emission",
+   "ra": 42.75,
+   "dec": 60.416666666666664,
+   "fov": 2.0,
+   "dist": 2100,
+   "source": "Gaia DR2",
+   "V": 6.5,
+   "file": "soul-nebula.jpg",
+   "mean": [
+    0.014263,
+    0.007706,
+    0.003631
+   ],
+   "masked": 2194
+  },
+  {
+   "name": "California Nebula",
+   "aka": [
+    "NGC 1499"
+   ],
+   "kind": "emission",
+   "ra": 60.824999999999996,
+   "dec": 36.42166666666667,
+   "fov": 2.8,
+   "dist": 450,
+   "source": "Lada et al. 2009",
+   "V": 6.0,
+   "file": "california-nebula.jpg",
+   "mean": [
+    0.029608,
+    0.01242,
+    0.002115
+   ],
+   "masked": 887
+  },
+  {
+   "name": "Elephant's Trunk Nebula",
+   "aka": [
+    "IC 1396"
+   ],
+   "kind": "emission",
+   "ra": 324.775,
+   "dec": 57.5,
+   "fov": 3.0,
+   "dist": 925,
+   "source": "Gaia DR2, Sicilia-Aguilar et al. 2019",
+   "V": 6.0,
+   "file": "elephant-s-trunk-nebula.jpg",
+   "mean": [
+    0.046379,
+    0.018859,
+    0.004578
+   ],
+   "masked": 1715
+  },
+  {
+   "name": "Pacman Nebula",
+   "aka": [
+    "NGC 281"
+   ],
+   "kind": "emission",
+   "ra": 13.245833333333334,
+   "dec": 56.621944444444445,
+   "fov": 0.6,
+   "dist": 2800,
+   "source": "Gaia DR2",
+   "V": 7.4,
+   "file": "pacman-nebula.jpg",
+   "mean": [
+    0.110507,
+    0.054902,
+    0.020694
+   ],
+   "masked": 2084
+  },
+  {
+   "name": "Bubble Nebula",
+   "aka": [
+    "NGC 7635"
+   ],
+   "kind": "emission",
+   "ra": 350.19999999999993,
+   "dec": 61.20166666666667,
+   "fov": 0.4,
+   "dist": 2700,
+   "source": "Gaia DR2",
+   "V": 10.0,
+   "file": "bubble-nebula.jpg",
+   "mean": [
+    0.049924,
+    0.019128,
+    0.004159
+   ],
+   "masked": 3715
+  },
+  {
+   "name": "Cone Nebula",
+   "aka": [
+    "NGC 2264",
+    "Christmas Tree Cluster"
+   ],
+   "kind": "emission",
+   "ra": 100.275,
+   "dec": 9.883333333333333,
+   "fov": 1.2,
+   "dist": 720,
+   "source": "Gaia DR2, Ma\u00edz Apell\u00e1niz 2019",
+   "V": 6.5,
+   "file": "cone-nebula.jpg",
+   "mean": [
+    0.012346,
+    0.010069,
+    0.009171
+   ],
+   "masked": 699
+  },
+  {
+   "name": "Seagull Nebula",
+   "aka": [
+    "IC 2177"
+   ],
+   "kind": "emission",
+   "ra": 106.10416666666667,
+   "dec": -10.45,
+   "fov": 2.2,
+   "dist": 1100,
+   "source": "Gaia DR2",
+   "V": 7.0,
+   "file": "seagull-nebula.jpg",
+   "mean": [
+    0.012494,
+    0.007466,
+    0.004247
+   ],
+   "masked": 3330
+  },
+  {
+   "name": "Thor's Helmet",
+   "aka": [
+    "NGC 2359"
+   ],
+   "kind": "emission",
+   "ra": 109.625,
+   "dec": -13.23,
+   "fov": 0.25,
+   "dist": 3670,
+   "source": "Gaia DR2 central star",
+   "V": 10.0,
+   "file": "thor-s-helmet.jpg",
+   "mean": [
+    0.045729,
+    0.035319,
+    0.027715
+   ],
+   "masked": 1119
+  },
+  {
+   "name": "Running Chicken Nebula",
+   "aka": [
+    "IC 2944"
+   ],
+   "kind": "emission",
+   "ra": 174.58333333333334,
+   "dec": -63.36666666666667,
+   "fov": 1.4,
+   "dist": 1800,
+   "source": "Gaia DR2",
+   "V": 6.0,
+   "file": "running-chicken-nebula.jpg",
+   "mean": [
+    0.112907,
+    0.061978,
+    0.028765
+   ],
+   "masked": 2902
+  },
+  {
+   "name": "Tarantula Nebula",
+   "aka": [
+    "30 Doradus",
+    "NGC 2070"
+   ],
+   "kind": "emission",
+   "ra": 84.675,
+   "dec": -69.10083333333333,
+   "fov": 0.7,
+   "dist": 49590,
+   "source": "LMC, Pietrzy\u0144ski et al. 2019",
+   "V": 8.0,
+   "within": "Large Magellanic Cloud"
+  }
+ ]
+}
