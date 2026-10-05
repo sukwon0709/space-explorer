@@ -336,6 +336,9 @@ export class Ship {
 
   dropWarp(world: FlightWorld, tdb: number): void {
     this.warp.on = false;
+    // The field is measured again on the next step; until then there is no stale reading.
+    this.gravity = [0, 0, 0];
+    this.strongest = -1;
     this.stop(world, tdb);
   }
 
