@@ -4,7 +4,31 @@ A real-time 3D simulator for travelling from Earth through the Solar System and 
 
 The full plan, including the roadmap, lives in the [design doc](https://claude.ai/code/artifact/c235450b-21cd-41a8-bc4b-b69ca4239c84).
 
-## Milestone 2: Earth and Moon surfaces (this code)
+## Milestone 3: the Solar System (this code)
+
+- **Every planet, the major moons, Pluto and Charon, and Ceres, Vesta, Pallas and Hygiea** (`src/core/bodies.ts`), as triaxial ellipsoids with IAU 2015 radii, turning with the IAU rotation models from NAIF's pck00011 (`src/core/iau.ts`, matching SPICE to 1e-9 rad in `tests/rotation.test.ts`).
+- **Moon and asteroid positions from JPL's satellite and asteroid kernels** (mar099, jup365, sat441, ura184, nep097, plu060, sb441-n16), refitted to float32 Chebyshev series within 1 km and checked against the kernels at 930 epochs that were not fitted (`tests/moons.test.ts`). Each system's file loads when the camera nears it.
+- **Global maps** from USGS mosaics (MESSENGER, Viking, Mars Express, Galileo, Voyager, Cassini, Dawn, New Horizons) and, for Jupiter and Saturn, the 2025 Hubble OPAL maps (`pipeline/build_maps.py`). Uranus and Neptune use OPAL latitude profiles with their true colours (Irwin et al. 2024). Monochrome maps, and Viking's false-colour Mars, are tinted with each body's colour. Every map is colour-balanced so its average matches the body's colour at its geometric albedo.
+- **Shading and shadows.** Cloud decks use Minnaert limb darkening, rocky and icy surfaces a Lommel-Seeliger/Lambert mix. Moons cast shadows on planets and each other, and planets on their moons, from the overlap of the Sun's and the body's discs, so penumbrae are right (`src/render/shadow.ts`).
+- **Rings.** Saturn's radial profile is from the Cassini radio occultation of 3 May 2005 at 1 km resolution. Jupiter's, Uranus's and Neptune's rings use published widths and optical depths. Rings are lit by single scattering in a layer of that optical depth (lit and unlit faces differ), the planet's shadow falls across them, and their shadow falls on the planet (`src/render/rings.ts`).
+- **The Sun.** The photosphere is the SDO/HMI continuum image of 21 Sep 2026 15:15 UTC, sunspots and all, projected onto the Sun and turning with it, with limb darkening. The corona (Baumbach model) appears only when the disc is covered. Glare fades with the fraction of the disc in view.
+- **Eclipses.** The Moon's shadow darkens the ground, the clouds and the air on Earth, and Earth's shadow turns the Moon red. **Gate:** the 2 August 2027 total eclipse computed from DE440 and IERS Earth orientation matches NASA's published path of totality. The central line is within 0.69 km across the track and 1.3 s along it, the north and south limits within 0.68 km, and the duration at greatest eclipse is 382.5 s against NASA's 382.6 s (`tests/eclipse.test.ts`).
+- **Asteroids and comets.** 238,333 asteroids (every numbered one brighter than H = 16, plus every near-Earth asteroid; NEAs in orange) are solved from their orbits on the GPU each frame. About 4,000 comets are solved on the CPU, with elliptic, parabolic and hyperbolic orbits. Both come from the JPL Small-Body Database and show when the view is wide.
+- **Exposure.** Exposure follows the eye. Sunlit ground looks the same at Neptune as at Earth, bright clouds and ice get less exposure than dark rock, and the eye opens up in the dark of totality.
+- **Time bar.** Rates from −30 days to +30 days per second, a date and time box (UTC), and an events menu. The menu has the 2027 eclipse from Luxor and from space, the 2026 eclipse from Burgos, the lunar eclipses of 3 Mar 2026 and 31 Dec 2028, Io's shadow on Jupiter and Saturn in 2017. Event times were found with the app's own ephemeris.
+- **Go-to search** over every body, 260 named asteroids and every comet.
+
+New URL parameters: `look` turns the view up from the ground toward the sky (degrees), `aim=sun` faces the Sun from a ground point, and `fov` sets the field of view. For example, totality from Luxor is `?focus=Earth&t=2027-08-02T10:05:15Z&lat=25.6989&lon=32.6421&dist=0.05&tilt=4&aim=sun&fov=5`. `focus` also takes asteroid and comet names (`?focus=2P/Encke`).
+
+### Limits
+
+- Moon and asteroid positions cover 1960–2060, like DE440 in the app. The two-body asteroid and comet orbits leave out planetary perturbations, which is fine for drawing them but drifts by thousands of km over years.
+- The Sun's map is one day's view from Earth. The far side is shown as quiet Sun, and spots change from day to day.
+- Parts of some moons were never imaged (Triton 61% coverage, Pluto 68%, Charon 66%). Those areas show the body's average colour. Venus and Titan have no visible-light surface, so they are their cloud colour. Mimas, Hyperion, Phoebe, the Uranian moons, Deimos, Pallas and Hygiea have no map yet. Vesta's map uses the IAU 2015 prime meridian, which was not checked against the mosaic. Phobos's mosaic is lit differently on either side of 180° longitude, so its edges are cross-faded and a soft brightness step remains there.
+- Shadows treat each occluder as a sphere. The corona is a smooth model without streamers. The red of a lunar eclipse is an approximate colour, not computed from Earth's atmosphere.
+- Each body has one ring shadow source, its own rings. Rings do not shadow moons.
+
+## Milestone 2: Earth and Moon surfaces
 
 - **Streaming terrain.** Earth and the Moon are quadtrees of terrain tiles (`src/render/globe.ts`), loaded on demand from tile packs and refined until each texel is about a pixel. Each tile's centre is float64 and its vertices are float32 offsets from it, placed relative to the camera every frame, so you can go from 1.5 m above the ground to the Moon without jitter (`tests/jitter.test.ts` replays the float32 GPU path: worst error 0.007 px).
 - **Earth.** NASA Blue Marble colour (2.4 km pixels), NOAA ETOPO 2022 heights on the WGS84 ellipsoid (EGM96 geoid added, oceans at sea level), and NASA Black Marble city lights on the night side.
@@ -39,7 +63,7 @@ Views can be linked with URL parameters, for example `?focus=Earth&lat=36.075&lo
 ```sh
 npm install
 npm run dev          # http://localhost:5173
-npm test             # ephemeris, Horizons, orientation, satellites, jitter and time tests
+npm test             # ephemeris, Horizons, orientation, rotation, moons, eclipse, satellites, jitter and time tests
 npm run build
 npm run screenshot   # renders reference views to screenshots/ (headless Chromium)
 ```
@@ -64,6 +88,15 @@ python3 pipeline/fetch_sources.py $DATA --clouds 2026-10-05T04
 python3 pipeline/build_tiles.py $DATA public/data/tiles src/generated/tiles.json   # --only earth-night,... to rebuild some layers
 python3 pipeline/build_clouds.py $DATA/gmgsi_lw_2026-10-05T04.nc public/data/clouds.png src/generated/clouds.json
 
+# Moons, asteroids, rotation models, maps, rings, the Sun, small bodies and the eclipse fixture
+python3 pipeline/build_moons.py $DATA/spkcache public/data --fixtures tests/fixtures/moons-reference.json
+python3 pipeline/build_rotation.py $DATA src/generated/rotation.json --fixtures tests/fixtures/rotation-reference.json
+python3 pipeline/build_maps.py $DATA public/data/maps src/generated/maps.json      # --only mars,io,... to rebuild some
+python3 pipeline/build_rings.py $DATA public/data/saturn-rings.json
+python3 pipeline/build_sun.py 2026-09-21T15:15:00 public/data/maps/sun.jpg src/generated/sun.json
+python3 pipeline/fetch_smallbodies.py public/data
+python3 pipeline/fetch_eclipse.py tests/fixtures/eclipse-2027-08-02.json
+
 # Satellites and stars
 python3 pipeline/fetch_satellites.py public/data/satellites.json
 python3 pipeline/build_stars.py node_modules/d3-celestial/data/stars.8.json public/data/stars.bin
@@ -83,4 +116,11 @@ Tiles are geographic: level L has 2^(L+1) × 2^L tiles of 180/2^L degrees. Colou
 - LRO LROC WAC colour and LOLA elevation, from NASA SVS's CGI Moon Kit.
 - CelesTrak GP orbital elements (stations, visual, GPS).
 - XHIP: An Extended Hipparcos Compilation (Anderson & Francis 2012), via the `d3-celestial` package.
-- IAU WGCCRE 2015 report on cartographic coordinates and rotational elements (radii, poles).
+- IAU WGCCRE 2015 report on cartographic coordinates and rotational elements (radii, poles, rotation), via NAIF pck00011.
+- NAIF satellite ephemerides mar099, jup365, sat441, ura184, nep097, plu060 (Jacobson et al.) and JPL's sb441-n16 asteroid ephemeris.
+- USGS Astrogeology global mosaics: MESSENGER MDIS (NASA/JHUAPL/CIW), Viking Orbiter, Mars Express SRC (ESA/DLR/FU Berlin), Galileo SSI and Voyager, Cassini ISS (NASA/JPL), Dawn FC (NASA/JPL, DLR), New Horizons LORRI (NASA/JHUAPL/SwRI).
+- Hubble OPAL global maps of Jupiter, Saturn, Uranus and Neptune (Simon et al., MAST HLSP); Uranus and Neptune true colours from Irwin et al. 2024.
+- Cassini RSS Saturn ring occultation, Rev 7 (PDS Ring-Moon Systems Node, CORSS_8001).
+- SDO/HMI continuum intensitygram (NASA/SDO and the HMI science team).
+- JPL Small-Body Database (asteroid and comet orbits).
+- NASA eclipse predictions by Fred Espenak (eclipse.gsfc.nasa.gov) for the 2027 path test; IERS Bulletin A for UT1.

@@ -7,3 +7,4 @@ netCDF4>=1.6
 pyproj>=3.6
 spiceypy>=6
 skyfield>=1.49  # only for tests/fixtures/satellites-reference.json
+astropy>=6  # OPAL FITS maps

@@ -87,6 +87,7 @@ uniform mat3 uSceneToBody;
 uniform vec3 uCamBody;
 uniform float uFlatten;
 uniform float uSunIntensity;
+uniform vec3 uEclTint;
 varying vec2 vUv;
 varying vec3 vNormal;
 varying vec3 vRel;
@@ -104,6 +105,7 @@ void main() {
   vec3 rel = uSceneToBody * vRel;
   vec3 viewDir = normalize(rel);
   float ndl = dot(n, uSun);
+  float eclipse = eclipseVisibility(uCamBody + rel);
 #ifdef ATMOSPHERE
   // Atmosphere maths runs in the frame where the ellipsoid is a sphere (z scaled by a/b).
   vec3 cam = vec3(uCamBody.xy, uCamBody.z * uFlatten);
@@ -114,10 +116,11 @@ void main() {
   vec3 color = albedo * sunT * max(ndl, 0.0);
   // Skylight: a small fraction of the sunlight, blue-tinted, fading through twilight.
   color += albedo * vec3(0.05, 0.07, 0.11) * smoothstep(-0.15, 0.4, sunUp);
+  color *= eclipse;
   if (vWater > 0.5) {
     vec3 h = normalize(uSun - viewDir);
     float fresnel = 0.02 + 0.98 * pow(1.0 - max(dot(n, -viewDir), 0.0), 5.0);
-    color += sunT * pow(max(dot(n, h), 0.0), 220.0) * 6.0 * fresnel * step(0.0, ndl);
+    color += sunT * pow(max(dot(n, h), 0.0), 220.0) * 6.0 * fresnel * step(0.0, ndl) * eclipse;
   }
   color *= uSunIntensity;
   if (uHasNight > 0.5) {
@@ -134,7 +137,9 @@ void main() {
   float ls = 2.0 * mu0 / (mu0 + mu + 1e-4);
   // The LROC mosaic is stretched for display (mean linear value 0.31); the Moon's
   // normal albedo is about 0.12, so scale it back.
-  vec3 color = albedo * 0.4 * mix(mu0, ls * 0.5, 0.7) * uSunIntensity;
+  // In Earth's umbra the Moon is lit only by sunlight refracted through Earth's
+  // atmosphere, reddened by the same scattering that makes sunsets red (uEclTint).
+  vec3 color = albedo * 0.4 * mix(mu0, ls * 0.5, 0.7) * uSunIntensity * (eclipse + (1.0 - eclipse) * uEclTint);
 #endif
   gl_FragColor = vec4(color, 1.0);
   #include <tonemapping_fragment>
@@ -162,6 +167,10 @@ export class Globe {
     uCamBody: { value: new THREE.Vector3() },
     uFlatten: { value: 1 },
     uSunIntensity: { value: 7 },
+    uEclSun: { value: new THREE.Vector3() },
+    uEclSunRadius: { value: 695700 },
+    uEclOcc: { value: new THREE.Vector4() },
+    uEclTint: { value: new THREE.Vector3() },
   };
   private blankNight = new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1);
   pending = 0;

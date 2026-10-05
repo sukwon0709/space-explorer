@@ -1,0 +1,212 @@
+{
+ "callisto": {
+  "coverage": 0.962,
+  "kind": "surface",
+  "mean": [
+   0.24014,
+   0.19716,
+   0.14634
+  ],
+  "source": "NASA Voyager and Galileo SSI, USGS"
+ },
+ "ceres": {
+  "coverage": 0.965,
+  "kind": "surface",
+  "mean": [
+   0.24675,
+   0.22766,
+   0.205
+  ],
+  "source": "NASA/JPL Dawn FC, DLR, USGS"
+ },
+ "charon": {
+  "coverage": 0.66,
+  "kind": "surface",
+  "mean": [
+   0.23153,
+   0.20395,
+   0.17931
+  ],
+  "source": "NASA/JHUAPL/SwRI New Horizons LORRI, USGS"
+ },
+ "dione": {
+  "coverage": 0.999,
+  "kind": "surface",
+  "mean": [
+   0.25069,
+   0.23971,
+   0.22181
+  ],
+  "source": "NASA/JPL Cassini ISS and Voyager, USGS"
+ },
+ "enceladus": {
+  "coverage": 1.0,
+  "kind": "surface",
+  "mean": [
+   0.2493,
+   0.2493,
+   0.24179
+  ],
+  "source": "NASA/JPL Cassini ISS, USGS"
+ },
+ "europa": {
+  "coverage": 0.957,
+  "kind": "surface",
+  "mean": [
+   0.24789,
+   0.21881,
+   0.1641
+  ],
+  "source": "NASA Voyager and Galileo SSI, USGS"
+ },
+ "ganymede": {
+  "coverage": 0.964,
+  "kind": "surface",
+  "mean": [
+   0.20756,
+   0.19432,
+   0.16629
+  ],
+  "source": "NASA Voyager and Galileo SSI colour, USGS"
+ },
+ "iapetus": {
+  "coverage": 1.0,
+  "kind": "surface",
+  "mean": [
+   0.24981,
+   0.21759,
+   0.16323
+  ],
+  "source": "NASA/JPL Cassini ISS and Voyager, USGS"
+ },
+ "io": {
+  "coverage": 1.0,
+  "kind": "surface",
+  "mean": [
+   0.33828,
+   0.23029,
+   0.10663
+  ],
+  "source": "NASA Galileo SSI and Voyager, USGS"
+ },
+ "jupiter": {
+  "coverage": 0.932,
+  "kind": "clouds",
+  "mean": [
+   0.42463,
+   0.30698,
+   0.20372
+  ],
+  "source": "NASA/ESA Hubble OPAL 2025 (PI A. Simon), 395/502/631 nm"
+ },
+ "mars": {
+  "coverage": 1.0,
+  "kind": "surface",
+  "mean": [
+   0.23659,
+   0.06355,
+   0.02358
+  ],
+  "source": "NASA Viking Orbiter mosaic, USGS"
+ },
+ "mercury": {
+  "coverage": 1.0,
+  "kind": "surface",
+  "mean": [
+   0.24657,
+   0.22398,
+   0.2013
+  ],
+  "source": "NASA/JHUAPL/CIW MESSENGER MDIS, USGS mosaic"
+ },
+ "neptune": {
+  "coverage": 0.864,
+  "kind": "clouds",
+  "mean": [
+   0.36043,
+   0.52717,
+   0.66035
+  ],
+  "source": "NASA/ESA Hubble OPAL 2025 latitude profile (547 nm), true colour from Irwin et al. 2024"
+ },
+ "phobos": {
+  "coverage": 0.998,
+  "kind": "surface",
+  "mean": [
+   0.24962,
+   0.20786,
+   0.1716
+  ],
+  "source": "ESA/DLR/FU Berlin Mars Express SRC, USGS"
+ },
+ "pluto": {
+  "coverage": 0.681,
+  "kind": "surface",
+  "mean": [
+   0.22991,
+   0.16276,
+   0.10738
+  ],
+  "source": "NASA/JHUAPL/SwRI New Horizons LORRI, USGS"
+ },
+ "rhea": {
+  "coverage": 1.0,
+  "kind": "surface",
+  "mean": [
+   0.25027,
+   0.23654,
+   0.21312
+  ],
+  "source": "NASA/JPL Cassini ISS and Voyager, USGS"
+ },
+ "saturn": {
+  "coverage": 0.907,
+  "kind": "clouds",
+  "mean": [
+   0.40328,
+   0.40564,
+   0.32253
+  ],
+  "source": "NASA/ESA Hubble OPAL 2025 (PI A. Simon), 395/502/631 nm"
+ },
+ "tethys": {
+  "coverage": 1.0,
+  "kind": "surface",
+  "mean": [
+   0.25056,
+   0.23873,
+   0.22439
+  ],
+  "source": "NASA/JPL Cassini ISS, USGS"
+ },
+ "triton": {
+  "coverage": 0.614,
+  "kind": "surface",
+  "mean": [
+   0.30441,
+   0.32936,
+   0.22917
+  ],
+  "source": "NASA Voyager 2 colour mosaic, USGS"
+ },
+ "uranus": {
+  "coverage": 0.582,
+  "kind": "clouds",
+  "mean": [
+   0.34895,
+   0.52064,
+   0.55387
+  ],
+  "source": "NASA/ESA Hubble OPAL 2025 latitude profile (547 nm), true colour from Irwin et al. 2024"
+ },
+ "vesta": {
+  "coverage": 1.0,
+  "kind": "surface",
+  "mean": [
+   0.25033,
+   0.23381,
+   0.21031
+  ],
+  "source": "NASA/JPL Dawn FC, USGS"
+ }
+}

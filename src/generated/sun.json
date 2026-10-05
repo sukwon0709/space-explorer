@@ -1,0 +1,10 @@
+{
+  "source": "NASA SDO/HMI continuum intensitygram (flattened quick-look), projected to IAU_SUN",
+  "time": "2026-09-21T15:15:00Z",
+  "sub_earth_deg": [
+    57.954236,
+    7.078062
+  ],
+  "scale": 1.25,
+  "coverage": 0.3812069892883301
+}

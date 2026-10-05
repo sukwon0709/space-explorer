@@ -1,3 +1,5 @@
+import { ECLIPSE_GLSL } from './shadow';
+
 /**
  * Earth's atmosphere: single scattering by air molecules (Rayleigh) and aerosols (Mie),
  * with ozone absorption, integrated along each view ray. Coefficients are the
@@ -18,6 +20,7 @@ export const ATMOSPHERE = {
 };
 
 export const ATMOSPHERE_GLSL = /* glsl */ `
+${ECLIPSE_GLSL}
 const float ATM_BOTTOM = ${ATMOSPHERE.bottom.toFixed(3)};
 const float ATM_TOP = ${ATMOSPHERE.top.toFixed(3)};
 const vec3 RAYLEIGH = vec3(${ATMOSPHERE.rayleigh.map((v) => v.toExponential(4)).join(', ')});
@@ -86,7 +89,9 @@ void atmScatter(vec3 ro, vec3 rd, float t0, float t1, vec3 sunDir, out vec3 insc
     vec3 p = ro + rd * (t0 + (float(i) + 0.5) * dt);
     vec3 d = atmDensity(length(p) - ATM_BOTTOM) * dt;
     depth += d;
-    vec3 t = exp(-atmExtinction(depth + atmSunDepth(p, sunDir)));
+    // Air in the Moon's shadow scatters no sunlight: the sky darkens in a solar eclipse.
+    // (p is in the frame where z is scaled by uFlatten; the shadow needs true positions.)
+    vec3 t = exp(-atmExtinction(depth + atmSunDepth(p, sunDir))) * eclipseVisibility(vec3(p.xy, p.z / uFlatten));
     sumR += t * d.x;
     sumM += t * d.y;
   }

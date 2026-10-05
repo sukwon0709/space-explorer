@@ -74,6 +74,15 @@ export class Clock {
     return tdbToUtc(this.tdb);
   }
 
+  /** The clock's range, UTC (Unix ms). */
+  get minUtc(): number {
+    return tdbToUtc(this.min);
+  }
+
+  get maxUtc(): number {
+    return tdbToUtc(this.max);
+  }
+
   private clamp(tdb: number): number {
     if (tdb < this.min || tdb > this.max) this.paused = true;
     return Math.min(this.max, Math.max(this.min, tdb));

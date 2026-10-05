@@ -14,7 +14,10 @@
       <div id="focus-name">Loading…</div>
       <div id="focus-detail"></div>
     </header>
-    <nav id="bodies" aria-label="Fly to"></nav>
+    <nav id="bodies" aria-label="Fly to">
+      <input id="search" type="search" list="search-options" placeholder="Go to…" aria-label="Go to a planet, moon, asteroid or comet" autocomplete="off" />
+      <datalist id="search-options"></datalist>
+    </nav>
     <footer id="timebar">
       <button data-rate="-2592000" title="Reverse, 30 days per second">−30d/s</button>
       <button data-rate="-86400" title="Reverse, 1 day per second">−1d/s</button>
@@ -25,7 +28,9 @@
       <button data-rate="86400" title="1 day per second">1d/s</button>
       <button data-rate="2592000" title="30 days per second">30d/s</button>
       <span id="utc"></span>
+      <input id="date" type="datetime-local" step="60" aria-label="Date and time (UTC)" title="Jump to a date and time (UTC)" />
       <button id="now">Now</button>
+      <select id="events" aria-label="Jump to an event"><option value="">Events…</option></select>
     </footer>
     <div id="credit"></div>
     <script type="module" src="/src/main.ts"></script>
