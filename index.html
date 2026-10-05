@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Space Explorer</title>
+    <link rel="stylesheet" href="/src/ui/style.css" />
+  </head>
+  <body>
+    <canvas id="view"></canvas>
+    <div id="labels"></div>
+    <header id="hud">
+      <div class="brand">Space Explorer</div>
+      <div id="focus-name">Loading…</div>
+      <div id="focus-detail"></div>
+    </header>
+    <nav id="bodies" aria-label="Fly to"></nav>
+    <footer id="timebar">
+      <button data-rate="-2592000" title="Reverse, 30 days per second">−30d/s</button>
+      <button data-rate="-86400" title="Reverse, 1 day per second">−1d/s</button>
+      <button data-rate="-3600" title="Reverse, 1 hour per second">−1h/s</button>
+      <button data-rate="0" title="Pause">Pause</button>
+      <button data-rate="1" title="Real time">1×</button>
+      <button data-rate="3600" title="1 hour per second">1h/s</button>
+      <button data-rate="86400" title="1 day per second">1d/s</button>
+      <button data-rate="2592000" title="30 days per second">30d/s</button>
+      <span id="utc"></span>
+      <button id="now">Now</button>
+    </footer>
+    <div id="credit">Positions: JPL DE421 · Stars: Hipparcos (XHIP)</div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

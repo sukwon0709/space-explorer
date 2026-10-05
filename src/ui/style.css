@@ -1,0 +1,22 @@
+:root { color-scheme: dark; --ink: #e8ecf2; --quiet: #9aa6b5; --panel: rgba(12, 16, 24, 0.72); --accent: #7fb0ff; }
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: #000; color: var(--ink); font: 13px/1.4 system-ui, -apple-system, 'Segoe UI', sans-serif; overflow: hidden; }
+#view { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+#labels { position: fixed; inset: 0; pointer-events: none; }
+.label { position: absolute; transform: translate(-4px, -4px); display: flex; align-items: center; gap: 6px; pointer-events: auto; cursor: pointer; white-space: nowrap; color: var(--quiet); }
+.label::before { content: ''; width: 7px; height: 7px; border-radius: 50%; border: 1.5px solid currentColor; }
+.label:hover, .label.focus { color: var(--ink); }
+#hud { position: fixed; top: 16px; left: 16px; padding: 10px 14px; background: var(--panel); border-radius: 8px; min-width: 220px; }
+.brand { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--quiet); }
+#focus-name { font-size: 20px; font-weight: 600; }
+#focus-detail { color: var(--quiet); white-space: pre-line; }
+#bodies { position: fixed; top: 16px; right: 16px; display: flex; flex-direction: column; gap: 4px; }
+#bodies button, #timebar button { background: var(--panel); color: var(--ink); border: 1px solid rgba(255,255,255,0.12); border-radius: 6px; padding: 5px 10px; font: inherit; cursor: pointer; }
+#bodies button.focus, #timebar button.active { border-color: var(--accent); color: var(--accent); }
+#timebar { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); display: flex; gap: 4px; align-items: center; padding: 6px; background: var(--panel); border-radius: 8px; max-width: calc(100vw - 32px); overflow-x: auto; }
+#utc { padding: 0 10px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+#credit { position: fixed; left: 16px; bottom: 16px; color: var(--quiet); font-size: 11px; }
+@media (max-width: 720px) {
+  #bodies { top: auto; bottom: 72px; right: 16px; flex-direction: row; flex-wrap: wrap; justify-content: flex-end; max-width: calc(100vw - 32px); }
+  #credit { display: none; }
+}
