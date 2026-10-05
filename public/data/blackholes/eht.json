@@ -1,0 +1,16 @@
+{
+ "m87-eht": {
+  "field": 149.16,
+  "ring": 42.0,
+  "credit": "EHT Collaboration",
+  "licence": "CC BY 4.0",
+  "source": "https://cdn.eso.org/images/large/eso1907a.jpg"
+ },
+ "sgra-eht": {
+  "field": 140.66,
+  "ring": 51.8,
+  "credit": "EHT Collaboration",
+  "licence": "CC BY 4.0",
+  "source": "https://cdn.eso.org/images/large/eso2208-eht-mwa.jpg"
+ }
+}

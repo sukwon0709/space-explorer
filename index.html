@@ -32,7 +32,10 @@
       <input id="date" type="datetime-local" step="60" aria-label="Date and time (UTC)" title="Jump to a date and time (UTC)" />
       <button id="now">Now</button>
       <select id="events" aria-label="Jump to an event"><option value="">Events…</option></select>
+      <select id="tours" aria-label="Start a guided tour"><option value="">Tours…</option></select>
     </footer>
+    <section id="tour" aria-label="Guided tour" aria-live="polite"></section>
+    <aside id="eht" hidden aria-label="Compared with the Event Horizon Telescope"></aside>
     <div id="credit"></div>
     <script type="module" src="/src/main.ts"></script>
   </body>

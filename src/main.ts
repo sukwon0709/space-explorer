@@ -21,6 +21,8 @@ import { StarGlobe } from './render/starglobe';
 import { MilkyWayGlow } from './render/milkyway';
 import { icrsPcToGalactocentric } from './core/milkyway';
 import { DeepSky, GALAXY_ID } from './deepsky';
+import { BlackHoles, type SStar } from './blackholes';
+import { EhtPanel, type EhtMeta } from './ui/ehtpanel';
 import { MPC_KM, type GalaxyIndex } from './core/galaxies';
 import type { SkyImage } from './render/images';
 import { CmbLayer } from './render/cmb';
@@ -28,6 +30,7 @@ import { PC_KM, apparentMagnitude, namedStarPosition, parseStarIndex, yearsSince
 import { NAMED_SATELLITES, SatelliteLayer } from './render/satellites';
 import { formatDistance, formatUtc } from './ui/format';
 import { EVENTS } from './ui/events';
+import { TOURS, TourPlayer, type TourStep } from './ui/tours';
 import manifest from './generated/tiles.json';
 import cloudsMeta from './generated/clouds.json';
 import mapsMeta from './generated/maps.json';
@@ -69,7 +72,7 @@ interface Target {
 }
 
 async function main() {
-  const [ephemeris, orientation, starIndexRaw, namedStars, constellationData, dust, cloudTexture, satelliteSnapshot, smallBuffer, asteroidsBuffer, cometData, asteroidNames, saturnRings, galaxyIndex, galaxyBuffer, skyImages] = await Promise.all([
+  const [ephemeris, orientation, starIndexRaw, namedStars, constellationData, dust, cloudTexture, satelliteSnapshot, smallBuffer, asteroidsBuffer, cometData, asteroidNames, saturnRings, galaxyIndex, galaxyBuffer, skyImages, sstarData, ehtMeta] = await Promise.all([
     Ephemeris.load(`${BASE}data/de440.bin`),
     Orientation.load(`${BASE}data/orientation.bin`),
     fetch(`${BASE}data/stars/index.json`).then((r) => r.json()),
@@ -86,6 +89,8 @@ async function main() {
     fetch(`${BASE}data/galaxies/index.json`).then((r) => r.json() as Promise<GalaxyIndex>).catch(() => undefined),
     fetch(`${BASE}data/galaxies/local.bin`).then((r) => (r.ok ? r.arrayBuffer() : undefined)).catch(() => undefined),
     fetch(`${BASE}data/images/index.json`).then((r) => r.json() as Promise<{ images: SkyImage[] }>).then((j) => j.images).catch(() => [] as SkyImage[]),
+    fetch(`${BASE}data/blackholes/sstars.json`).then((r) => r.json() as Promise<{ stars: SStar[] }>).then((j) => j.stars).catch(() => [] as SStar[]),
+    fetch(`${BASE}data/blackholes/eht.json`).then((r) => r.json() as Promise<Record<string, EhtMeta>>).catch(() => ({}) as Record<string, EhtMeta>),
   ]);
   if (smallBuffer) ephemeris.add(smallBuffer);
   const asteroids: AsteroidSet | undefined = asteroidsBuffer ? parseAsteroids(asteroidsBuffer) : undefined;
@@ -103,7 +108,13 @@ async function main() {
 
   const canvas = document.getElementById('view') as HTMLCanvasElement;
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, logarithmicDepthBuffer: true, preserveDrawingBuffer: params.has('capture') });
-  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  // Quality: ?quality=low|high, else low on phones and tablets. Low draws at most one
+  // pixel per CSS pixel, loads fewer faint stars and traces black holes with longer steps.
+  const handheld = matchMedia('(pointer: coarse)').matches && Math.min(screen.width, screen.height) < 900;
+  const quality = params.get('quality') ?? (handheld ? 'low' : 'auto');
+  const maxPixelRatio = Math.min(devicePixelRatio, quality === 'low' ? 1 : 2);
+  let pixelRatio = maxPixelRatio;
+  renderer.setPixelRatio(pixelRatio);
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.1;
 
@@ -131,6 +142,11 @@ async function main() {
     cmb = new CmbLayer(map, deep.cosmology.lastScattering);
     scene.add(cmb.mesh);
   }).catch(() => undefined);
+
+  // Black holes, with the S-stars and the companions drawn by the star field's shader.
+  const bhs = new BlackHoles(stars.material, starIndex.teff, sstarData);
+  scene.add(bhs.stars.points);
+  bhs.view.setQuality(quality === 'low' ? 'low' : quality === 'high' ? 'high' : 'normal');
 
   const textureLoader = new THREE.TextureLoader();
   const sunMap = await textureLoader.loadAsync(`${BASE}data/maps/sun.jpg`).catch(() => undefined);
@@ -210,6 +226,8 @@ async function main() {
     targets.set(STAR_ID + k, { id: STAR_ID + k, name: star.name, kind: 'star', radius: star.radius * SOLAR_RADIUS });
   });
   for (const t of deep.targets) targets.set(t.id, { id: t.id, name: t.name, kind: t.kind, radius: t.radius });
+  for (const t of bhs.targets) targets.set(t.id, { id: t.id, name: t.name, kind: t.kind, radius: t.radius });
+  const isHole = (id: number) => bhs.has(id);
   const isStar = (id: number) => id >= STAR_ID && id < GALAXY_ID;
   const isDeep = (id: number) => deep.has(id);
   const starOf = (id: number) => namedStars[id - STAR_ID];
@@ -217,6 +235,7 @@ async function main() {
   const starPc: Vec3 = [0, 0, 0];
   const positionOf = (id: number, out: Vec3 = [0, 0, 0]): Vec3 => {
     if (isDeep(id)) return deep.position(id, out);
+    if (isHole(id)) return bhs.position(id, out);
     if (isStar(id)) {
       namedStarPosition(starOf(id), yearsSinceEpoch(clock.tdb), starPc);
       for (let k = 0; k < 3; k++) starPc[k] *= PC_KM;
@@ -258,6 +277,7 @@ async function main() {
     const centre = positionOf(id);
     const s = surfaces.get(id);
     if (isDeep(id)) return deep.frame(id, centre) ?? { origin: centre, ...SCENE_BASIS };
+    if (isHole(id)) return bhs.frame(id, centre);
     if (!s || !anchor) return { origin: centre, ...SCENE_BASIS };
     const target = s.globe.heightAt(anchor.lon, anchor.lat);
     const prev = anchorHeights.get(id) ?? target;
@@ -304,6 +324,7 @@ async function main() {
     const target = targets.get(id)!;
     if (surfaces.has(id)) return { distance: target.radius * 3, yaw: 0, pitch: 1.25, anchor: sunlitAnchor(id) };
     if (isDeep(id)) return { ...deep.view(id, target.radius), anchor: undefined };
+    if (isHole(id)) return { ...bhs.viewFor(id), anchor: undefined };
     const [yaw, pitch] = sunlitView(id);
     const body = findBody(id);
     const distance = isStar(id) ? target.radius * 6 : !body ? 3e6 : RINGS[id] && id === 699 ? target.radius * 7 : target.radius * 4;
@@ -348,6 +369,7 @@ async function main() {
     names: params.get('names') !== '0',
     planets: params.get('exoplanets') === '1',
     cmb: params.get('cmb') === '1',
+    radio: params.get('radio') !== '0',
   };
 
   // ---- Earth satellites -------------------------------------------------------
@@ -418,11 +440,13 @@ async function main() {
     for (const alias of [star.desig, star.host, ...(star.aka ?? [])]) if (alias && !byName.has(alias.toLowerCase())) byName.set(alias.toLowerCase(), STAR_ID + k);
   });
   for (const t of deep.targets) for (const alias of t.aliases) if (!byName.has(alias.toLowerCase())) byName.set(alias.toLowerCase(), t.id);
+  for (const t of bhs.targets) for (const alias of t.aliases) if (!byName.has(alias.toLowerCase())) byName.set(alias.toLowerCase(), t.id);
   const deepById = new Map(deep.targets.map((t) => [t.id, t]));
   options.append(...[...targets.values()].map((t) => {
     const o = document.createElement('option');
     o.value = t.name;
     if (isDeep(t.id)) o.label = [...(deepById.get(t.id)?.aliases.slice(0, 2) ?? []), t.kind].join(' · ');
+    else if (isHole(t.id)) o.label = 'black hole';
     else if (isStar(t.id)) {
       const star = starOf(t.id);
       o.label = [star.desig, star.host, star.planets ? `${star.planets.length} planet${star.planets.length > 1 ? 's' : ''}` : ''].filter(Boolean).join(' · ') || 'star';
@@ -466,7 +490,7 @@ async function main() {
   });
   // Sky layers: constellation figures, star names, stars with known planets.
   const layerBar = document.getElementById('layers')!;
-  for (const [key, title] of [['constellations', 'Constellations'], ['names', 'Star names'], ['planets', 'Exoplanets'], ['cmb', 'Microwave background']] as const) {
+  for (const [key, title] of [['constellations', 'Constellations'], ['names', 'Star names'], ['planets', 'Exoplanets'], ['cmb', 'Microwave background'], ['radio', 'Radio 230 GHz']] as const) {
     const button = document.createElement('button');
     button.textContent = title;
     button.classList.toggle('active', layers[key]);
@@ -476,6 +500,9 @@ async function main() {
     });
     layerBar.append(button);
   }
+  const radioButton = layerBar.lastElementChild as HTMLElement;
+  const bhLabels = new Map<number, HTMLElement>();
+  const ehtPanel = new EhtPanel(document.getElementById('eht')!, ehtMeta, `${BASE}data/blackholes/`);
 
   const satelliteLabels = new Map<number, HTMLElement>();
   for (const [id, name] of NAMED_SATELLITES) {
@@ -488,16 +515,46 @@ async function main() {
 
   // ---- input ----------------------------------------------------------------
   // Drag pans across the ground on Earth and the Moon (orbits elsewhere);
-  // right-drag or shift-drag turns and tilts the view.
+  // right-drag or shift-drag turns and tilts the view. On touch screens, one finger
+  // drags, two fingers pinch to zoom and move together to turn and tilt.
   let drag: { button: number; shift: boolean } | undefined;
+  const pointers = new Map<number, { x: number; y: number }>();
+  const pinch = () => {
+    const [a, b] = [...pointers.values()];
+    return { d: Math.hypot(a.x - b.x, a.y - b.y), x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+  };
+  let pinchState: { d: number; x: number; y: number } | undefined;
   const pixelsPerRadian = () => innerHeight / (2 * Math.tan((camera.fov * DEG) / 2));
   canvas.addEventListener('contextmenu', (e) => e.preventDefault());
-  canvas.addEventListener('pointerdown', (e) => { drag = { button: e.button, shift: e.shiftKey }; canvas.setPointerCapture(e.pointerId); });
-  canvas.addEventListener('pointerup', () => { drag = undefined; });
+  canvas.addEventListener('pointerdown', (e) => {
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    canvas.setPointerCapture(e.pointerId);
+    drag = pointers.size === 1 ? { button: e.button, shift: e.shiftKey } : undefined;
+    pinchState = pointers.size === 2 ? pinch() : undefined;
+  });
+  const release = (e: PointerEvent) => {
+    pointers.delete(e.pointerId);
+    drag = undefined;
+    pinchState = undefined;
+  };
+  canvas.addEventListener('pointerup', release);
+  canvas.addEventListener('pointercancel', release);
   canvas.addEventListener('pointermove', (e) => {
+    const last = pointers.get(e.pointerId);
+    if (!last) return;
+    const dx = e.clientX - last.x, dy = e.clientY - last.y;
+    last.x = e.clientX;
+    last.y = e.clientY;
+    if (pinchState && pointers.size === 2) {
+      const now = pinch();
+      if (now.d > 0 && pinchState.d > 0) rig.zoom(Math.log(pinchState.d / now.d) / 0.0015);
+      rig.orbit(now.x - pinchState.x, now.y - pinchState.y);
+      pinchState = now;
+      return;
+    }
     if (!drag) return;
-    if (rig.anchor && drag.button === 0 && !drag.shift) rig.pan(e.movementX, e.movementY, pixelsPerRadian(), targets.get(rig.focus)!.radius);
-    else rig.orbit(e.movementX, e.movementY);
+    if (rig.anchor && drag.button === 0 && !drag.shift) rig.pan(dx, dy, pixelsPerRadian(), targets.get(rig.focus)!.radius);
+    else rig.orbit(dx, dy);
   });
   canvas.addEventListener('wheel', (e) => { e.preventDefault(); rig.zoom(e.deltaY); }, { passive: false });
 
@@ -556,6 +613,45 @@ async function main() {
     });
   });
 
+  // On phones the HUD shows a few lines; a tap shows the rest.
+  document.getElementById('hud')!.addEventListener('click', (e) => (e.currentTarget as HTMLElement).classList.toggle('expanded'));
+
+  // ---- guided tours -----------------------------------------------------------
+  const tourSelect = document.getElementById('tours') as HTMLSelectElement;
+  TOURS.forEach((t, k) => {
+    const o = document.createElement('option');
+    o.value = String(k);
+    o.textContent = t.title;
+    tourSelect.append(o);
+  });
+  const tourStep = (step: TourStep) => {
+    const id = byName.get(step.focus.toLowerCase());
+    if (id === undefined) return;
+    if (step.radio !== undefined) {
+      layers.radio = step.radio;
+      radioButton.classList.toggle('active', step.radio);
+    }
+    prepare(id);
+    waitFor(() => id >= ASTEROID_ID || system.available(id), 30000).then(() => {
+      const v = viewFor(id);
+      rig.flyTo(id, step.dist ?? v.distance, performance.now() / 1000, step.yaw ?? v.yaw, step.pitch ?? v.pitch, v.anchor, step.flight ?? 6);
+      lookUp = 0;
+      fov = 50;
+      skyAim = undefined;
+    });
+  };
+  const tours = new TourPlayer(document.getElementById('tour')!, tourStep);
+  tourSelect.addEventListener('change', () => {
+    const tour = TOURS[Number(tourSelect.value)];
+    tourSelect.value = '';
+    if (tour) tours.start(tour);
+  });
+  // ?tour=1&step=3 starts a tour (numbered from 1) at a step.
+  if (params.has('tour')) {
+    const tour = TOURS[Number(params.get('tour')) - 1];
+    if (tour) tours.start(tour, Number(params.get('step') ?? 1) - 1);
+  }
+
   const resize = () => {
     renderer.setSize(innerWidth, innerHeight, false);
     camera.aspect = innerWidth / innerHeight;
@@ -575,9 +671,44 @@ async function main() {
       'Saturn rings: Cassini RSS',
       satelliteSource && `Satellites: ${satelliteSource}`,
       'Stars: ESA Gaia DR3, Hipparcos (XHIP), Bailer-Jones distances; dust: Edenhofer et al. 2024; exoplanets: NASA Exoplanet Archive; constellations: Stellarium',
+      'Galaxies: UNGC, Cosmicflows-4, 2MRS, 6dFGS, SDSS; images: DSS2; CMB: Planck',
+      'Black holes: GRAVITY, Gillessen et al. 2017, Gaia, Miller-Jones et al. 2021; EHT images: EHT Collaboration (CC BY 4.0)',
     ].filter(Boolean).join(' · ');
   }
   updateCredits();
+
+  // ---- frame rate ---------------------------------------------------------------
+  // The drawing resolution follows the frame rate: down when frames take over 1/30 s
+  // (as the ray-traced black holes can on a laptop), back up when there is room.
+  // ?stats=1 shows the frame rate.
+  const adaptive = quality !== 'high' && !params.has('capture');
+  const statsEl = params.has('stats') ? document.body.appendChild(document.createElement('div')) : undefined;
+  if (statsEl) statsEl.id = 'stats';
+  let frameTime = 1 / 60;
+  let lastAdapt = 0;
+  const setPixelRatio = (ratio: number) => {
+    pixelRatio = ratio;
+    renderer.setPixelRatio(ratio);
+    // Point sizes are in device pixels: every layer that draws points needs the ratio.
+    scene.traverse((o) => {
+      const u = ((o as THREE.Mesh).material as THREE.ShaderMaterial | undefined)?.uniforms;
+      if (u?.uPixelRatio) u.uPixelRatio.value = ratio;
+      if (u?.pixelRatio) u.pixelRatio.value = ratio;
+    });
+  };
+  const adaptResolution = (dt: number) => {
+    frameTime += (dt - frameTime) * 0.1;
+    const t = performance.now() / 1000;
+    if (statsEl && frameNumber % 10 === 0) statsEl.textContent = `${(1 / frameTime).toFixed(0)} fps · ${pixelRatio.toFixed(2)}×`;
+    if (!adaptive || t - lastAdapt < 1.5) return;
+    if (frameTime > 1 / 30 && pixelRatio > 0.5) {
+      setPixelRatio(Math.max(0.5, pixelRatio * 0.8));
+      lastAdapt = t;
+    } else if (frameTime < 1 / 50 && pixelRatio < maxPixelRatio) {
+      setPixelRatio(Math.min(maxPixelRatio, pixelRatio * 1.15));
+      lastAdapt = t + 3; // rise slowly
+    }
+  };
 
   // ---- frame loop -----------------------------------------------------------
   const nameEl = document.getElementById('focus-name')!;
@@ -603,8 +734,17 @@ async function main() {
     system.update(clock.tdb);
     updateOrientation();
     const focus = targets.get(rig.focus)!;
-    rig.minDistance = rig.anchor ? 0.0015 : isDeep(focus.id) ? focus.radius * 0.02 : focus.radius * 1.0002;
-    const { eye, target, up } = rig.solve(frameOf, now);
+    rig.minDistance = rig.anchor ? 0.0015 : isDeep(focus.id) ? focus.radius * 0.02 : isHole(focus.id) ? bhs.minDistance(focus.id) : focus.radius * 1.0002;
+    tours.update(now, rig.flying);
+    adaptResolution(dt);
+    const { eye, target, up, offset } = rig.solve(frameOf, now);
+    // Near a black hole the camera is placed from the hole itself: its scene position
+    // (hundreds of parsecs out) is far too coarse for a horizon tens of km across.
+    let holeRel: Vec3 | undefined;
+    if (isHole(rig.focus)) {
+      const c = bhs.position(rig.focus);
+      holeRel = [offset[0] + (target[0] - c[0]), offset[1] + (target[1] - c[1]), offset[2] + (target[2] - c[2])];
+    }
 
     // Keep the camera above the ground on bodies with terrain.
     for (const [id, s] of surfaces) {
@@ -711,7 +851,7 @@ async function main() {
     su.uMsat.value = limit - 6.5;
     su.uPixelsPerRadian.value = ppr;
     su.uBrightness.value = 1 - 0.98 * daylight;
-    stars.loadLimit = limit + 1.6;
+    stars.loadLimit = limit + (quality === 'low' ? 0.6 : 1.6);
     stars.update(camPc, years);
     // Diffuse light (the Milky Way's glow, galaxies, nebulae): surface brightness mu
     // (V mag/arcsec^2) shows as 10^(-0.4 (mu - muRef)). A star of the saturation
@@ -750,6 +890,8 @@ async function main() {
     } else starGlobe.hide();
     // Up close the globe is the star: drop its point (and anything as near) from the star field.
     stars.hideWithin = isStar(rig.focus) && rig.distance < focus.radius * 200 ? (1.5 * rig.distance) / PC_KM : 0;
+    bhs.radio = layers.radio;
+    stars.hideWithin = Math.max(stars.hideWithin, bhs.update(eye, rig.focus, holeRel, clock.tdb));
 
     // Exposure follows the eye: sunlit ground at the focus body's distance from the Sun
     // looks the same everywhere, the Sun's own surface is shown at a readable level up
@@ -783,7 +925,19 @@ async function main() {
     // Asteroids and comets: a map layer, shown when the view is wide enough to see orbits.
     smallBodies?.update(clock.tdb / 86400, sunPos, eye, Math.max(smoothstep(2e6, 2e7, rig.distance), rig.focus >= ASTEROID_ID && rig.focus < STAR_ID ? 1 : 0));
 
-    renderer.render(scene, camera);
+    if (holeRel && bhs.active(rig.focus, length(holeRel), ppr)) {
+      // Lensing: the scene drawn into a view texture and a cube map around the camera,
+      // then each pixel's ray traced back through the hole's spacetime.
+      const galCam = icrsPcToGalactocentric(camPc);
+      const glowScale = (1 - 0.98 * daylight) * 10 ** (-0.4 * (26.402 - muRef - boost));
+      const setup = (cam: THREE.PerspectiveCamera, p: number, size?: number) => {
+        su.uPixelsPerRadian.value = p;
+        glow.update(renderer, cam, galCam, limit, glowScale, size);
+        deep.update(camMpc, galaxyMsat, p, 1 - 0.98 * daylight, rig.distance);
+        cmb?.update(cam, camMpc, cmbOpacity);
+      };
+      bhs.draw(renderer, scene, camera, rig.focus, eye, holeRel, clock.tdb, frameNumber, ppr, (face, size) => setup(face, size / 2, size), () => setup(camera, ppr));
+    } else renderer.render(scene, camera);
 
     // Labels: projected from camera-relative float64 positions. Placed in order of
     // importance; one that would overlap a label already placed is hidden.
@@ -819,7 +973,7 @@ async function main() {
       }
       return false;
     };
-    const smallFocus = rig.focus >= ASTEROID_ID;
+    const smallFocus = rig.focus >= ASTEROID_ID && !isHole(rig.focus);
     focusLabel.textContent = smallFocus ? focus.name : '';
     if (smallFocus) place(rig.focus, focusLabel, positionOf(rig.focus), false);
     else focusLabel.style.display = 'none';
@@ -902,6 +1056,23 @@ async function main() {
       }
     }
     for (const [id, label] of deepLabels) if (!shownDeep.has(id)) label.style.display = 'none';
+    // Stars around a black hole: the S-stars of Sgr A*, a companion.
+    const shownBh = new Set<number>();
+    if (layers.names && isHole(rig.focus)) {
+      for (const [k, name, p] of bhs.labels(rig.focus)) {
+        let label = bhLabels.get(k);
+        if (!label) {
+          label = document.createElement('div');
+          label.className = 'label skystar';
+          label.textContent = name;
+          labelLayer.append(label);
+          bhLabels.set(k, label);
+        }
+        place(-4, label, p, false);
+        shownBh.add(k);
+      }
+    }
+    for (const [k, label] of bhLabels) if (!shownBh.has(k)) label.style.display = 'none';
     const constellationCentres = layers.constellations && constellations ? constellations.centres(camPc, years) : [];
     constellationLabels.forEach((label, k) => {
       if (!layers.constellations) {
@@ -943,6 +1114,8 @@ async function main() {
       if (sunVisible < 0.999) lines.push(sunVisible < 1e-6 ? 'Total solar eclipse' : `Sun ${(100 * (1 - sunVisible)).toFixed(1)}% covered`);
     } else if (isDeep(rig.focus)) {
       lines.push(...deep.describe(rig.focus, camMpc, rig.distance));
+    } else if (holeRel) {
+      lines.push(...bhs.describe(rig.focus, holeRel, clock.tdb));
     } else if (isStar(rig.focus)) {
       const star = starOf(rig.focus);
       const p = namedStarPosition(star, years, [0, 0, 0]);
@@ -965,7 +1138,7 @@ async function main() {
     } else {
       lines.push(`Camera altitude ${formatDistance(rig.distance - focus.radius)}`);
     }
-    if (focus.id !== 10 && !isStar(focus.id) && !isDeep(focus.id)) {
+    if (focus.id !== 10 && !isStar(focus.id) && !isDeep(focus.id) && !isHole(focus.id)) {
       lines.push(`${(fromSun / AU).toFixed(4)} AU from the Sun`);
       lines.push(`Sunlight takes ${formatLightTime(fromSun)} to arrive`);
     }
@@ -973,13 +1146,15 @@ async function main() {
     if (cmb && cmbOpacity > 0.05) {
       lines.push('Microwave background (Planck, false colour): blue 500 µK colder, red 500 µK hotter than 2.7255 K');
     }
+    radioButton.style.display = isHole(rig.focus) && bhs.hole(rig.focus).flow === 'hot' ? '' : 'none';
+    ehtPanel.show(isHole(rig.focus) && !rig.flying ? bhs.ehtTarget(rig.focus) : undefined);
     nameEl.textContent = focus.name;
     detailEl.textContent = lines.join('\n');
     utcEl.textContent = formatUtc(clock.utc);
     if (document.activeElement !== dateInput && frameNumber % 15 === 0) dateInput.value = new Date(clock.utc).toISOString().slice(0, 16);
     const pending = [...surfaces.values()].reduce((n, x) => n + x.globe.pending, 0) + loading + stars.pending;
     document.body.dataset.ready = 'true';
-    document.body.dataset.tiles = pending === 0 ? 'idle' : 'loading';
+    document.body.dataset.tiles = pending === 0 && !rig.flying ? 'idle' : 'loading';
     requestAnimationFrame(frame);
   };
   requestAnimationFrame(frame);

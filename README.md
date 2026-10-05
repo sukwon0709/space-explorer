@@ -4,7 +4,35 @@ A real-time 3D simulator for travelling from Earth through the Solar System and 
 
 The full plan, including the roadmap, lives in the [design doc](https://claude.ai/code/artifact/c235450b-21cd-41a8-bc4b-b69ca4239c84).
 
-## Milestone 5: the Milky Way and beyond (this code)
+## Milestone 6: black holes and tours (this code)
+
+- **Black holes, ray-traced in the Kerr metric** (`src/core/kerr.ts`, `src/render/blackhole.ts`). Near a black hole, every pixel's light ray is followed back from the camera along a null geodesic of the spinning (Kerr) spacetime, in Boyer-Lindquist coordinates with fourth-order Runge-Kutta steps on the photon's Hamiltonian. The camera is a zero-angular-momentum observer, so its view includes aberration and the hole's frame dragging. Rays that pass farther than 100 GM/c² are bent with the weak-field formula instead. What a ray meets decides the pixel: the horizon (black), the accretion flow, a companion star, or the sky it came from, looked up in a cube map of the scene drawn around the camera. The same equations run in TypeScript for the tests and in the shader. On the spin axis, where these coordinates are singular, rays are carried straight over the pole.
+- **Six black holes** (`src/core/blackholes.ts`, `pipeline/fetch_blackholes.py`), each with its measured mass, distance and orientation where one is known.
+  - **Sgr A\***: 4.30 million Suns at 8.277 kpc (GRAVITY 2022), with the 39 S-stars on their measured orbits (Gillessen et al. 2017; S2 from GRAVITY 2020). They move in real time and dim behind 27 magnitudes of dust from Earth.
+  - **M87\***: 6.0 billion Suns (Gebhardt et al. 2011, scaled to the Virgo Cluster distance of 16.2 Mpc), spin axis along its jet (Walker et al. 2018).
+  - **Gaia BH1, BH2 and BH3**, the dormant black holes Gaia found from their companions' orbits (El-Badry et al. 2023; Panuzzo et al. 2024). The companion stars orbit them in real time.
+  - **Cygnus X-1**: 21.2 Suns at 2.22 kpc (Miller-Jones et al. 2021), spin 0.998, with a thin disc and its blue supergiant companion, HDE 226868.
+- **Light from matter.** Cygnus X-1's disc is a Novikov-Thorne thin disc at 2% of the Eddington limit (Page and Thorne 1974 flux). Its observed colour is a blackbody at the temperature shifted by the gravitational and Doppler redshift of each point. Sgr A* and M87* show 230 GHz radio light (the `Radio 230 GHz` button, in the EHT's false colour) from a hot flow. Its emissivity profile is the one Gralla, Lupsasca and Marrone (2020) fitted to GRMHD simulations, and its intensity scales as g³. In visible light (button off) their faint flows do not show, only the shadow against the stars.
+- **Compared with the EHT.** Beside Sgr A* and M87*, a panel shows the EHT image (credit EHT Collaboration, CC BY 4.0) next to the app's model of the same patch of sky, traced from Earth's direction and blurred to the EHT's 20 µas resolution, at the same scale.
+- **Panel.** For each black hole the panel shows its mass, spin and their sources, its horizon size and its shadow's size from Earth. It also shows the camera's distance in GM/c² and how fast clocks run there compared with far away.
+- **Guided tours** (`src/ui/tours.ts`): *Earth to the edge of the universe* (14 stops), *Journey to Sgr A\** and *Black holes of the Milky Way*. Start one from the `Tours…` menu. Each stop has a caption, and the tour moves on by itself; it can be paused, stepped back and forward, or ended. `?tour=2&step=4` opens a tour at a stop.
+- **Laptops and phones.** The drawing resolution follows the frame rate. It drops when frames take over 1/30 s, as the ray-traced views can on a laptop, and recovers when there is room. Phones and tablets (or `?quality=low`) draw one pixel per CSS pixel, load fewer faint stars and trace with longer steps. Touch screens pinch to zoom and turn with two fingers. On narrow screens the panel folds to three lines (tap to open it). `?stats=1` shows the frame rate.
+- **Gate:** the shadow and the ring match theory and the EHT (`tests/blackholes.test.ts`).
+  - Rays traced from a distant camera are captured inside, and escape outside, Bardeen's (1973) analytic shadow edge scaled by ±0.1%. This holds for spins 0, 0.9 and 0.99 seen from 17° to 90°.
+  - The modelled 230 GHz images, blurred to the EHT's resolution and measured the way the EHT measures ring diameters, give 54.9 µas for Sgr A* (EHT: 51.8 ± 2.3) and 38.1 µas for M87* (EHT: 42 ± 3). The test requires 2σ.
+  - The angular gravitational radii are 5.12 µas for Sgr A* (EHT: 4.8 +1.4/−0.7) and 3.64 µas for M87* (EHT: 3.8 ± 0.4).
+  - S2's orbit weighs Sgr A* to within 2% of the mass used, and every companion keeps its published periastron, apastron and period.
+
+New targets: `?focus=Sgr%20A*`, `M87*`, `Gaia BH1`, `Gaia BH2`, `Gaia BH3`, `Cygnus X-1`. `radio=0` shows Sgr A* and M87* in visible light. For example, the S-stars are `?focus=Sgr%20A*&dist=1.5e12&pitch=0.6&radio=0`.
+
+### Limits
+
+- The spins of Sgr A* and M87* and the tilt of Sgr A* are assumptions within the EHT's favoured ranges. The Gaia black holes' spins are unknown and drawn as zero. Cygnus X-1's disc is assumed to lie in its orbital plane.
+- The hot flows are a time-averaged emissivity profile, not a simulation: they have no turbulence, flares or jet, and are shown only at 230 GHz. The thin disc is opaque and geometrically flat, with no corona or wind.
+- Stars in the background are drawn as small discs, so lensing stretches them into short arcs where a true point would only brighten. Near the poles, rays are moved up to 1% of their radius sideways.
+- The Galactic Centre's nuclear star cluster has only its S-stars and the catalogue stars; the millions of fainter stars around it are missing.
+
+## Milestone 5: the Milky Way and beyond
 
 - **The Milky Way's glow, from inside and out** (`src/core/milkyway.ts`, `src/render/milkyway.ts`). The diffuse light is not a photograph: it is ray-marched through a model of the Galaxy every frame, so it is right from anywhere. The model has thin and thick discs, the boxy bulge and long bar (Dwek G2 shapes, bar at 28°), and spiral arms traced from masers (Reid et al. 2019, extrapolated on the far side). The Sun sits 8.277 kpc from the centre (GRAVITY 2022), 20.8 pc above the plane (Bennett and Bovy 2019). The disc is normalised to the local luminosity density measured from the app's own star catalogue (`pipeline/build_milkyway.py`), which gives a total M_V of -21.4. Only the light of stars fainter than those drawn is added, so the glow and the stars never double-count. Dust is the Edenhofer 3D map near the Sun and a model dust disc beyond, so the Great Rift and the dark lanes come out of the same dust that dims the stars. The view from outside is labelled as modelled.
 - **156,125 galaxies, plus 834,710 more from SDSS** (`pipeline/build_galaxies.py`). Measured distances come first: the Updated Nearby Galaxy Catalog (Cepheids, the tip of the red giant branch) and Cosmicflows-4 (Tully-Fisher, fundamental plane, supernovae, surface brightness fluctuations), using Cosmicflows-4 group distances for groups with at least two members. All other galaxies (2MRS, 6dFGS, SDSS) are placed by their CMB-frame redshift in flat ΛCDM with H0 = 74.6 (the Cosmicflows-4 scale). Redshift-only galaxies in the cores of the big clusters are placed at the cluster's distance, so the clusters are not stretched into "fingers of God". Each galaxy has its measured size, shape, orientation, colour and Milky Way extinction (SFD). Nearby ones are drawn as inclined discs or spheroids with their light spread to their true surface brightness; distant ones are points. 139 globular clusters (Harris 2010) are included.
@@ -161,6 +189,9 @@ python3 pipeline/fetch_galaxies.py $DATA       # UNGC, Cosmicflows-4, 2MRS, 6dFG
 python3 pipeline/build_galaxies.py $DATA public/data
 python3 pipeline/fetch_images.py $DATA public/data   # DSS2 colour via CDS hips2fits, Gaia DR3 for the foreground stars
 python3 pipeline/build_cmb.py $DATA public/data
+
+# Black holes: the S-stars and the EHT images
+python3 pipeline/fetch_blackholes.py $DATA public/data   # VizieR (Gillessen et al. 2017), ESO image archive
 ```
 
 Tiles are geographic: level L has 2^(L+1) × 2^L tiles of 180/2^L degrees. Colour tiles are 256 px JPEG; height tiles are 65 × 65 int16 grids in 0.5 m steps (the lowest bit marks water), zlib-compressed. Tiles are grouped into packs (one file per subtree) so a view needs a handful of requests.
@@ -195,4 +226,6 @@ Tiles are geographic: level L has 2^(L+1) × 2^L tiles of 180/2^L degrees. Colou
 - Planck PR3 SMICA CMB map (ESA and the Planck Collaboration 2020), via CDS hips2fits.
 - The Digitized Sky Surveys were produced at the Space Telescope Science Institute under U.S. Government grant NAG W-2166, from photographic data of the Palomar (POSS-II, Caltech) and UK Schmidt (Royal Observatory Edinburgh, AAO) telescopes; colour HiPS by CDS, via hips2fits.
 - Milky Way structure: Reid et al. (2019) spiral arms, GRAVITY Collaboration (2022) Galactic Centre distance, Bland-Hawthorn and Gerhard (2016) review values for the discs, bulge and bar.
+- Black holes: GRAVITY Collaboration (2020, 2022) for Sgr A* and S2; Gillessen et al. (2017) S-star orbits via VizieR; Gebhardt et al. (2011) and Walker et al. (2018) for M87*; El-Badry et al. (2023) for Gaia BH1 and BH2; Gaia Collaboration, Panuzzo et al. (2024) for Gaia BH3; Miller-Jones et al. (2021) and Zhao et al. (2021) for Cygnus X-1; Bardeen (1973); Page and Thorne (1974); Gralla, Lupsasca and Marrone (2020).
+- Event Horizon Telescope images of M87* (2019) and Sgr A* (2022): EHT Collaboration, CC BY 4.0, via ESO (eso1907a, eso2208-eht-mwa).
 - NASA eclipse predictions by Fred Espenak (eclipse.gsfc.nasa.gov) for the 2027 path test; IERS Bulletin A for UT1.

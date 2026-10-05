@@ -267,9 +267,10 @@ export class MilkyWayGlow {
    * @param cameraKpc the camera in the galactocentric model frame (kpc).
    * @param limit faintest magnitude drawn as a star (their light is left out of the glow).
    * @param scale display value of a line-of-sight luminosity of 1 Lsun/pc^2.
+   * @param square side of a square render target (a cube map face) instead of the canvas.
    */
-  update(renderer: THREE.WebGLRenderer, camera: THREE.PerspectiveCamera, cameraKpc: Vec3, limit: number, scale: number): void {
-    const size = renderer.getDrawingBufferSize(new THREE.Vector2());
+  update(renderer: THREE.WebGLRenderer, camera: THREE.PerspectiveCamera, cameraKpc: Vec3, limit: number, scale: number, square?: number): void {
+    const size = square ? new THREE.Vector2(square, square) : renderer.getDrawingBufferSize(new THREE.Vector2());
     const w = Math.max(1, Math.round(size.x * this.resolution)), h = Math.max(1, Math.round(size.y * this.resolution));
     if (this.target.width !== w || this.target.height !== h) this.target.setSize(w, h);
     const u = this.material.uniforms;

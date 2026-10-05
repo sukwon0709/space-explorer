@@ -57,7 +57,7 @@ export class CameraRig {
   }
 
   /** Fly to `target`, ending `distance` km from its look point, seen from `yaw`/`pitch`. */
-  flyTo(target: number, distance: number, now: number, yaw = this.yaw, pitch = this.pitch, anchor?: Anchor): void {
+  flyTo(target: number, distance: number, now: number, yaw = this.yaw, pitch = this.pitch, anchor?: Anchor, duration?: number): void {
     this.flight = {
       from: this.focus,
       fromAnchor: this.anchor,
@@ -65,7 +65,7 @@ export class CameraRig {
       fromYaw: this.yaw,
       fromPitch: this.pitch,
       start: now,
-      duration: target === this.focus ? 1.5 : 4,
+      duration: duration ?? (target === this.focus ? 1.5 : 4),
     };
     // Turn the short way round.
     this.yaw = this.yaw + Math.atan2(Math.sin(yaw - this.yaw), Math.cos(yaw - this.yaw));
@@ -105,8 +105,10 @@ export class CameraRig {
    * Camera position, look point and up vector (scene axes, km, float64) for this frame.
    * During a flight the look point and its frame slide between the two ends while the
    * distance follows an arc in log space, rising high enough to show both ends.
+   * `offset` is eye minus look point, exact even where the scene positions themselves
+   * are too coarse (a stellar black hole hundreds of parsecs away).
    */
-  solve(frameOf: (id: number, anchor?: Anchor) => Frame, now: number): { eye: Vec3; target: Vec3; up: Vec3 } {
+  solve(frameOf: (id: number, anchor?: Anchor) => Frame, now: number): { eye: Vec3; target: Vec3; up: Vec3; offset: Vec3 } {
     let frame = frameOf(this.target, this.anchor);
     let { distance, yaw, pitch } = this;
     if (this.flight) {
@@ -131,13 +133,15 @@ export class CameraRig {
     const hE = Math.sin(yaw), hN = Math.cos(yaw);
     const { origin, east, north, up } = frame;
     const eye: Vec3 = [0, 0, 0];
+    const offset: Vec3 = [0, 0, 0];
     const camUp: Vec3 = [0, 0, 0];
     for (let k = 0; k < 3; k++) {
       const heading = hE * east[k] + hN * north[k];
-      eye[k] = origin[k] + distance * (-cp * heading + sp * up[k]);
+      offset[k] = distance * (-cp * heading + sp * up[k]);
+      eye[k] = origin[k] + offset[k];
       camUp[k] = sp * heading + cp * up[k];
     }
-    return { eye, target: origin, up: camUp };
+    return { eye, target: origin, up: camUp, offset };
   }
 }
 

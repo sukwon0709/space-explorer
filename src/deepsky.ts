@@ -104,11 +104,10 @@ export class DeepSky {
       this.targets.push({ id: LOCAL_GROUP_ID, name: 'Local Group', kind: 'galaxy group', radius: 1.2 * MPC_KM, aliases: ['Local Group of galaxies'] });
     }
     this.targets.push({ id: MILKY_WAY_ID, name: 'Milky Way', kind: 'galaxy', radius: 15 * MPC_KM * 1e-3, aliases: ['Galaxy', 'Our galaxy'] });
-    this.targets.push({ id: SGR_A_ID, name: 'Sgr A*', kind: 'black hole', radius: 1e8, aliases: ['Sagittarius A*', 'Galactic Centre', 'Galactic Center'] });
   }
 
   has(id: number): boolean {
-    return id >= GALAXY_ID && id <= LOCAL_GROUP_ID && (id < NEBULA_ID || id >= MILKY_WAY_ID || id - NEBULA_ID < this.nebulae.length);
+    return id >= GALAXY_ID && id <= LOCAL_GROUP_ID && id !== SGR_A_ID && (id < NEBULA_ID || id >= MILKY_WAY_ID || id - NEBULA_ID < this.nebulae.length);
   }
 
   /** Telescope images for the galaxies that have one: the catalogue hands each over to its image as it resolves. */
@@ -286,11 +285,6 @@ export class DeepSky {
       lines.push(`Sun ${(R0 * 3261.56).toLocaleString('en-US', { maximumFractionDigits: 0 })} light years from the centre (GRAVITY 2022)`);
       lines.push(`Absolute magnitude ${this.milkyWay.absMag.toFixed(1)} (model)`);
       lines.push('Spiral arms: masers, Reid et al. 2019; far side extrapolated');
-    } else if (id === SGR_A_ID) {
-      lines.push('Supermassive black hole at the Galactic Centre');
-      lines.push(away(fromSun));
-      lines.push('4.3 million solar masses (GRAVITY 2022)');
-      lines.push('Its close-up arrives in milestone 6');
     } else if (id === LOCAL_GROUP_ID) {
       lines.push('The Milky Way, Andromeda, Triangulum and about 100 smaller galaxies');
       lines.push(away(fromSun));
