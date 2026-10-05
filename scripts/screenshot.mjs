@@ -18,8 +18,28 @@ const views = {
   'satellites': `focus=Earth&t=${T}&dist=60000&tilt=25`,
   'moon': `focus=Moon&t=${T}`,
   'earth-moon': `focus=Earth&t=${T}&dist=900000&heading=200&tilt=20`,
-  'saturn-2017': `focus=Saturn&t=2017-06-15T00:00:00Z&dist=420000&pitch=0.45`, // rings near widest (solstice)
+  // Milestone 3: the 2027 eclipse from the ground at Luxor (mid-totality) and from space.
+  'eclipse-luxor': `focus=Earth&t=2027-08-02T10:05:15Z&lat=25.6989&lon=32.6421&dist=0.05&tilt=4&aim=sun&fov=5`,
+  'eclipse-shadow': `focus=Earth&t=2027-08-02T10:05:30Z&lat=25.75&lon=32.79&dist=9000&heading=0&tilt=88`,
+  'lunar-eclipse': `focus=Moon&t=2026-03-03T11:34:00Z&lat=0&lon=0&dist=9000&heading=0&tilt=88`,
+  'sun': `focus=Sun&t=${T}`,
+  'mercury': `focus=Mercury&t=${T}`,
+  'venus': `focus=Venus&t=${T}`,
+  'mars': `focus=Mars&t=${T}`,
   'jupiter': `focus=Jupiter&t=${T}&dist=300000`,
+  'jupiter-io-shadow': `focus=Jupiter&t=2026-10-07T10:19:00Z&dist=330000`,
+  'galilean-moons': `focus=Jupiter&t=${T}&dist=4000000&pitch=0.3`,
+  'io': `focus=Io&t=${T}`,
+  'europa': `focus=Europa&t=${T}`,
+  'saturn-2017': `focus=Saturn&t=2017-06-15T00:00:00Z&dist=420000&pitch=0.45`, // rings near widest (solstice)
+  'saturn': `focus=Saturn&t=${T}`,
+  'titan': `focus=Titan&t=${T}`,
+  'uranus': `focus=Uranus&t=${T}&dist=150000`,
+  'neptune': `focus=Neptune&t=${T}`,
+  'pluto-charon': `focus=Pluto&t=${T}&dist=40000`,
+  'ceres': `focus=Ceres&t=${T}`,
+  'asteroid-belt': `focus=Sun&t=${T}&dist=900000000&pitch=0.7`,
+  'comet-encke': `focus=2P/Encke&t=${T}`,
 };
 const only = process.argv[3]?.split(',');
 

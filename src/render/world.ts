@@ -1,21 +1,40 @@
 import * as THREE from 'three';
-import { BODIES, SATURN_RINGS, bodyById, type Body } from '../core/bodies';
+import { BODIES, RINGS, bodyById, type Body } from '../core/bodies';
 import type { Ephemeris, Vec3 } from '../core/ephemeris';
-import { icrfToScene, raDecToIcrf, sub } from '../core/frames';
+import { icrfToScene, sub } from '../core/frames';
+import { eulerMatrix, hasRotation, iauBodyToScene, icrfToBodyAsScene } from '../core/iau';
+import type { Mat3, Orientation } from '../core/orientation';
+import { MAX_OCCLUDERS, PlanetGlobe, type BodyFrame } from './planets';
+import { RingView, ringProfile } from './rings';
+import { SunView } from './sun';
 
 const ORBIT_SAMPLES = 512;
+const DEG = Math.PI / 180;
+export const AU = 149597870.7;
+export const SUN_RADIUS = 695700;
 
 interface BodyView {
   body: Body;
   /** Scene-axis position relative to the barycentre, km, float64. Updated each frame. */
   pos: Vec3;
-  object: THREE.Object3D;
+  /** Body-fixed -> scene rotation. */
+  bodyToScene: Mat3;
+  /** False until the ephemeris has this body (moons load on demand). */
+  available: boolean;
+  globe?: PlanetGlobe;
+  rings?: RingView;
   orbit?: OrbitView;
 }
 
 interface OrbitView {
   line: THREE.LineLoop | THREE.Line;
   sampledAt: number;
+}
+
+export interface WorldAssets {
+  sunMap?: THREE.Texture;
+  sunScale: number;
+  saturnRings?: { inner_km: number; outer_km: number; tau: number[] };
 }
 
 /**
@@ -26,15 +45,26 @@ interface OrbitView {
 export class SolarSystem {
   readonly group = new THREE.Group();
   readonly views = new Map<number, BodyView>();
-  private readonly sunLight = new THREE.PointLight(0xffffff, 3.2, 0, 0);
-  private readonly scratch: Vec3 = [0, 0, 0];
+  readonly sun: SunView;
+  /** Exposure: 1 shows sunlit ground at 1 AU as is; raised in the dim outer system. */
+  exposure = 1;
+  /** Multiplies every orbit line's opacity. */
+  orbitOpacity = 1;
 
-  constructor(private readonly ephemeris: Ephemeris) {
-    this.group.add(this.sunLight);
+  constructor(private readonly ephemeris: Ephemeris, private readonly orientation: Orientation, assets: WorldAssets) {
+    this.sun = new SunView(SUN_RADIUS, assets.sunMap, assets.sunScale);
+    this.group.add(this.sun.group);
     for (const body of BODIES) {
-      const object = body.emissive ? makeSun(body) : makePlanet(body);
-      this.group.add(object);
-      const view: BodyView = { body, pos: [0, 0, 0], object };
+      const view: BodyView = { body, pos: [0, 0, 0], bodyToScene: new Float64Array(9), available: false };
+      if (!body.emissive) {
+        view.globe = new PlanetGlobe(body);
+        this.group.add(view.globe.mesh);
+      }
+      if (RINGS[body.id]) {
+        view.rings = new RingView(body.id, body.radii, ringProfile(body.id, body.id === 699 ? assets.saturnRings : undefined));
+        view.globe?.setRingShadow(view.rings.tau, view.rings.profile.inner, view.rings.profile.outer);
+        this.group.add(view.rings.mesh);
+      }
       if (body.orbit) {
         const line = makeOrbitLine(body);
         this.group.add(line);
@@ -44,49 +74,117 @@ export class SolarSystem {
     }
   }
 
-  /** Recompute float64 positions for the epoch. */
+  /** Recompute float64 positions and orientations for the epoch. */
   update(tdb: number): void {
+    const scratch: Vec3 = [0, 0, 0];
     for (const view of this.views.values()) {
-      icrfToScene(this.ephemeris.position(view.body.id, tdb, this.scratch), view.pos);
-      if (view.orbit && view.body.orbit) {
+      const id = view.body.id;
+      view.available = this.ephemeris.available(id, tdb);
+      if (!view.available) continue;
+      icrfToScene(this.ephemeris.position(id, tdb, scratch), view.pos);
+      if (this.orientation.has(id)) this.orientation.bodyToScene(id, tdb, view.bodyToScene);
+      else if (hasRotation(id)) iauBodyToScene(id, tdb, view.bodyToScene);
+      else icrfToBodyAsScene(eulerMatrix(view.body.pole[0] * DEG, view.body.pole[1] * DEG, 0), view.bodyToScene);
+      if (view.orbit && view.body.orbit && this.ephemeris.available(view.body.orbit.around, tdb)) {
         const periodSeconds = view.body.orbit.periodDays * 86400;
-        if (!(Math.abs(tdb - view.orbit.sampledAt) < periodSeconds / 256)) {
-          this.sampleOrbit(view, tdb);
-        }
+        if (!(Math.abs(tdb - view.orbit.sampledAt) < periodSeconds / 256)) this.sampleOrbit(view, tdb);
       }
     }
   }
 
-  /** Place every object relative to the camera (floating origin) and fade orbits near the camera. */
-  placeRelativeTo(camera: Vec3): void {
+  /**
+   * Place every object relative to the camera (floating origin), light it, and fade
+   * orbit lines near the camera.
+   * @param hidden bodies drawn by something else (Earth and the Moon's terrain).
+   * @param sunVisible fraction of the Sun's disc the camera sees.
+   * @param sky daytime sky brightness at the camera, 0..1.
+   */
+  placeRelativeTo(camera: Vec3, hidden: Set<number>, sunVisible: number, sky: number): void {
     const rel: Vec3 = [0, 0, 0];
+    const sunView = this.views.get(10)!;
+    sub(sunView.pos, camera, rel);
+    this.sun.update(rel, sunView.bodyToScene, sunVisible, this.exposure, sky);
     for (const view of this.views.values()) {
-      sub(view.pos, camera, rel);
-      view.object.position.set(rel[0], rel[1], rel[2]);
-      if (view.body.emissive) {
-        this.sunLight.position.set(rel[0], rel[1], rel[2]);
-        // Keep the Sun's glow at least a few percent of the view wide so it stays findable
-        // from the outer planets, where its true disk is under a pixel.
-        const glow = view.object.children[1] as THREE.Sprite;
-        glow.scale.setScalar(Math.max(view.body.radius[0] * 12, Math.hypot(rel[0], rel[1], rel[2]) * 0.06));
-      }
-      if (view.orbit && view.body.orbit) {
-        const parent = this.views.get(view.body.orbit.around)!;
+      const { body } = view;
+      if (view.globe) view.globe.mesh.visible = view.available && !hidden.has(body.id);
+      if (view.rings) view.rings.mesh.visible = view.available;
+      if (view.orbit) view.orbit.line.visible = false;
+      if (!view.available || body.emissive) continue;
+      const frame = this.bodyFrame(body.id, camera);
+      if (view.globe && !hidden.has(body.id)) view.globe.update(frame);
+      view.rings?.update(frame);
+      if (view.orbit && body.orbit && !Number.isNaN(view.orbit.sampledAt)) {
+        const parent = this.views.get(body.orbit.around)!;
         sub(parent.pos, camera, rel);
         view.orbit.line.position.set(rel[0], rel[1], rel[2]);
         // Hide a body's own orbit line once you are close to it: at that range the line is
         // just a streak through the planet.
         const d = Math.hypot(view.pos[0] - camera[0], view.pos[1] - camera[1], view.pos[2] - camera[2]);
-        const fade = THREE.MathUtils.clamp((d / view.body.radius[0] - 40) / 160, 0, 1);
-        const material = view.orbit.line.material as THREE.LineBasicMaterial;
-        material.opacity = 0.45 * fade;
-        view.orbit.line.visible = fade > 0;
+        const fade = THREE.MathUtils.clamp((d / body.radius[0] - 40) / 160, 0, 1);
+        (view.orbit.line.material as THREE.LineBasicMaterial).opacity = 0.45 * fade * this.orbitOpacity;
+        view.orbit.line.visible = fade * this.orbitOpacity > 0;
       }
     }
   }
 
+  /** Brightness of sunlight at a body, including exposure. */
+  intensity(id: number): number {
+    const p = this.views.get(id)!.pos, s = this.views.get(10)!.pos;
+    const r2 = (p[0] - s[0]) ** 2 + (p[1] - s[1]) ** 2 + (p[2] - s[2]) ** 2;
+    return (7 * this.exposure * AU * AU) / Math.max(r2, (SUN_RADIUS * 2) ** 2);
+  }
+
+  /** Lighting inputs for a body: Sun, the bodies that can eclipse it, brightness. */
+  bodyFrame(id: number, camera: Vec3): BodyFrame {
+    const view = this.views.get(id)!;
+    const sunRel = sub(this.views.get(10)!.pos, view.pos, [0, 0, 0]);
+    return {
+      centerRel: sub(view.pos, camera, [0, 0, 0]),
+      bodyToScene: view.bodyToScene,
+      sunRel,
+      sunRadius: SUN_RADIUS,
+      occluders: this.occluders(id, sunRel),
+      intensity: this.intensity(id),
+    };
+  }
+
+  /**
+   * Up to four bodies of the same system nearest to the line toward the Sun, as seen
+   * from this body: the only ones whose shadows can fall on it now.
+   */
+  occluders(id: number, sunRel: Vec3): Array<{ rel: Vec3; radius: number }> {
+    const self = this.views.get(id)!;
+    const system = systemOf(self.body);
+    const ds = Math.hypot(sunRel[0], sunRel[1], sunRel[2]);
+    const found: Array<{ rel: Vec3; radius: number; score: number }> = [];
+    for (const other of this.views.values()) {
+      if (other === self || !other.available || other.body.emissive || systemOf(other.body) !== system) continue;
+      const rel = sub(other.pos, self.pos, [0, 0, 0]);
+      const d = Math.hypot(rel[0], rel[1], rel[2]);
+      const cos = (rel[0] * sunRel[0] + rel[1] * sunRel[1] + rel[2] * sunRel[2]) / (d * ds);
+      if (cos <= 0 || d > ds) continue;
+      const sep = Math.acos(Math.min(1, cos));
+      const score = sep - (self.body.radii[0] + other.body.radii[0] * 1.2) / d - SUN_RADIUS / ds;
+      if (score < 0) found.push({ rel, radius: (other.body.radii[0] + other.body.radii[1] + other.body.radii[2]) / 3, score });
+    }
+    return found.sort((a, b) => a.score - b.score).slice(0, MAX_OCCLUDERS);
+  }
+
+  /** Give every body that uses this global map its texture. */
+  setMap(name: string, texture: THREE.Texture, mean: Vec3): void {
+    for (const view of this.views.values()) if (view.body.map === name) view.globe?.setMap(texture, mean);
+  }
+
   position(id: number): Vec3 {
     return this.views.get(id)!.pos;
+  }
+
+  available(id: number): boolean {
+    return this.views.get(id)?.available ?? false;
+  }
+
+  orientationOf(id: number): Mat3 {
+    return this.views.get(id)!.bodyToScene;
   }
 
   private sampleOrbit(view: BodyView, tdb: number): void {
@@ -94,9 +192,11 @@ export class SolarSystem {
     if (!orbit) return;
     const period = orbit.periodDays * 86400;
     // One full revolution centred on now, clipped to the ephemeris range (Pluto's
-    // 248-year orbit is longer than the bundled 61 years, so it draws as an arc).
-    const t0 = Math.max(this.ephemeris.start, tdb - period / 2);
-    const t1 = Math.min(this.ephemeris.end, tdb + period / 2);
+    // 248-year orbit is longer than the bundled years, so it draws as an arc).
+    const [s0, s1] = this.ephemeris.coverage(view.body.id);
+    const [p0, p1] = this.ephemeris.coverage(orbit.around);
+    const t0 = Math.max(s0, p0, tdb - period / 2);
+    const t1 = Math.min(s1, p1, tdb + period / 2);
     const closed = t1 - t0 >= period * 0.999;
     const positions = new Float32Array(ORBIT_SAMPLES * 3);
     const a: Vec3 = [0, 0, 0];
@@ -115,6 +215,7 @@ export class SolarSystem {
     geometry.computeBoundingSphere();
     if (closed !== view.orbit!.line instanceof THREE.LineLoop) {
       const replacement = closed ? new THREE.LineLoop(geometry, view.orbit!.line.material) : new THREE.Line(geometry, view.orbit!.line.material);
+      replacement.frustumCulled = false;
       this.group.remove(view.orbit!.line);
       this.group.add(replacement);
       view.orbit!.line = replacement;
@@ -123,86 +224,9 @@ export class SolarSystem {
   }
 }
 
-/** Rotation taking the mesh's +y axis onto the body's IAU north pole. */
-function poleQuaternion(body: Body): THREE.Quaternion {
-  const pole = icrfToScene(raDecToIcrf(body.pole[0], body.pole[1]));
-  return new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3(...pole).normalize());
-}
-
-function makePlanet(body: Body): THREE.Object3D {
-  const [eq, polar] = body.radius;
-  const geometry = new THREE.SphereGeometry(1, 96, 64);
-  const material = new THREE.MeshStandardMaterial({ color: body.color, roughness: 0.9, metalness: 0 });
-  const mesh = new THREE.Mesh(geometry, material);
-  mesh.scale.set(eq, polar, eq); // true oblateness
-  const holder = new THREE.Group();
-  holder.quaternion.copy(poleQuaternion(body));
-  holder.add(mesh);
-  if (body.id === 6) holder.add(makeSaturnRings());
-  holder.name = body.name;
-  return holder;
-}
-
-function makeSaturnRings(): THREE.Mesh {
-  const inner = SATURN_RINGS[0].inner;
-  const outer = SATURN_RINGS[SATURN_RINGS.length - 1].outer;
-  // Radial opacity profile as a 1D texture across the ring's width.
-  const width = 1024;
-  const data = new Uint8Array(width * 4);
-  for (let i = 0; i < width; i++) {
-    const r = inner + ((outer - inner) * (i + 0.5)) / width;
-    const band = SATURN_RINGS.find((b) => r >= b.inner && r < b.outer) ?? SATURN_RINGS[SATURN_RINGS.length - 1];
-    data.set([226, 210, 180, Math.round(band.opacity * 255)], i * 4);
-  }
-  const texture = new THREE.DataTexture(data, width, 1);
-  texture.magFilter = THREE.LinearFilter;
-  texture.minFilter = THREE.LinearFilter;
-  texture.needsUpdate = true;
-  texture.colorSpace = THREE.SRGBColorSpace;
-
-  const geometry = new THREE.RingGeometry(inner, outer, 256, 1);
-  // Map u to the radial direction so the texture runs from the inner to the outer edge.
-  const pos = geometry.attributes.position;
-  const uv = geometry.attributes.uv;
-  for (let i = 0; i < pos.count; i++) {
-    const r = Math.hypot(pos.getX(i), pos.getY(i));
-    uv.setXY(i, (r - inner) / (outer - inner), 0.5);
-  }
-  const material = new THREE.MeshStandardMaterial({ map: texture, transparent: true, side: THREE.DoubleSide, roughness: 1, depthWrite: false });
-  const rings = new THREE.Mesh(geometry, material);
-  rings.rotation.x = -Math.PI / 2; // ring plane = Saturn's equator (mesh xz plane)
-  return rings;
-}
-
-function makeSun(body: Body): THREE.Object3D {
-  const group = new THREE.Group();
-  const sphere = new THREE.Mesh(
-    new THREE.SphereGeometry(body.radius[0], 64, 32),
-    new THREE.MeshBasicMaterial({ color: new THREE.Color(body.color).multiplyScalar(4), toneMapped: true }),
-  );
-  group.add(sphere);
-  group.add(makeGlow(body.radius[0]));
-  group.name = body.name;
-  return group;
-}
-
-function makeGlow(radius: number): THREE.Sprite {
-  const size = 256;
-  const canvas = document.createElement('canvas');
-  canvas.width = canvas.height = size;
-  const ctx = canvas.getContext('2d')!;
-  const g = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
-  g.addColorStop(0, 'rgba(255,248,230,1)');
-  g.addColorStop(0.12, 'rgba(255,236,200,0.55)');
-  g.addColorStop(0.35, 'rgba(255,210,150,0.12)');
-  g.addColorStop(1, 'rgba(255,200,140,0)');
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, size, size);
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.colorSpace = THREE.SRGBColorSpace;
-  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true }));
-  sprite.scale.setScalar(radius * 12);
-  return sprite;
+/** The planet a body belongs with (itself for planets), or 10 for the Sun's own family. */
+export function systemOf(body: Body): number {
+  return body.orbit && body.orbit.around !== 10 ? body.orbit.around : body.id;
 }
 
 function makeOrbitLine(body: Body): THREE.LineLoop {

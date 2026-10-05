@@ -7,7 +7,7 @@ import { ATMOSPHERE, ATMOSPHERE_GLSL } from './atmosphere';
  * A latitude/longitude grid on the unit sphere in body-fixed axes (z = north pole),
  * with uv = ((lon + 180) / 360, (90 - lat) / 180) to match equirectangular maps.
  */
-function latLonSphere(segLon: number, segLat: number): THREE.BufferGeometry {
+export function latLonSphere(segLon: number, segLat: number): THREE.BufferGeometry {
   const positions: number[] = [];
   const uvs: number[] = [];
   const indices: number[] = [];
@@ -100,7 +100,7 @@ void main() {
   vec3 sunT = atmSunTransmittance(p, uSun);
   // Thick cloud scatters sunlight in all directions: bright on the sunlit side,
   // a little light through from above when seen from below.
-  vec3 color = sunT * (0.12 + 0.88 * max(ndl, 0.0)) * 0.75 * uSunIntensity;
+  vec3 color = sunT * (0.12 + 0.88 * max(ndl, 0.0)) * 0.75 * uSunIntensity * eclipseVisibility(uCamBody + rel);
   vec3 inscatter, transmittance;
   atmBetween(cam, p, uSun, inscatter, transmittance);
   float alpha = cover * 0.92;

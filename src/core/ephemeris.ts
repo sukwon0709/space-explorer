@@ -2,6 +2,10 @@
  * Planetary positions from JPL Chebyshev coefficients (SPK type 2), converted by
  * pipeline/build_ephemeris.py. All positions are km in the ICRF frame, relative to
  * the Solar System Barycenter (NAIF id 0), at a TDB epoch in seconds past J2000.
+ *
+ * Moons and asteroids come in extra files (pipeline/build_moons.py, format version 2,
+ * float32 coefficients) that are added once loaded; until then a planet's centre falls
+ * back to its system barycentre.
  */
 
 export type Vec3 = [number, number, number];
@@ -13,7 +17,7 @@ interface Segment {
   intlen: number;
   ncoef: number;
   nrec: number;
-  coef: Float64Array;
+  coef: Float64Array | Float32Array;
 }
 
 const MAGIC = 0x48504553; // "SEPH" little-endian
@@ -26,33 +30,31 @@ export class Ephemeris {
   readonly end: number;
 
   constructor(buffer: ArrayBuffer) {
-    const view = new DataView(buffer);
-    if (view.getUint32(0, true) !== MAGIC) throw new Error('Not a SEPH ephemeris file');
-    if (view.getUint32(4, true) !== 1) throw new Error('Unsupported SEPH version');
-    const count = view.getUint32(8, true);
-
     let start = -Infinity;
     let end = Infinity;
-    for (let i = 0; i < count; i++) {
-      const at = HEADER_BYTES + i * SEGMENT_BYTES;
-      const ncoef = view.getUint32(at + 24, true);
-      const nrec = view.getUint32(at + 28, true);
-      const offset = view.getUint32(at + 32, true);
-      const seg: Segment = {
-        center: view.getInt32(at, true),
-        target: view.getInt32(at + 4, true),
-        init: view.getFloat64(at + 8, true),
-        intlen: view.getFloat64(at + 16, true),
-        ncoef,
-        nrec,
-        coef: new Float64Array(buffer, offset, nrec * 3 * ncoef),
-      };
+    for (const seg of parse(buffer)) {
       this.byTarget.set(seg.target, seg);
       start = Math.max(start, seg.init);
-      end = Math.min(end, seg.init + nrec * seg.intlen);
+      end = Math.min(end, seg.init + seg.nrec * seg.intlen);
     }
     this.start = start;
     this.end = end;
+  }
+
+  /** Add the segments of another file (moons, asteroids). Returns the bodies added. */
+  add(buffer: ArrayBuffer): number[] {
+    const added: number[] = [];
+    for (const seg of parse(buffer)) {
+      this.byTarget.set(seg.target, seg);
+      added.push(seg.target);
+    }
+    return added;
+  }
+
+  static async fetch(url: string): Promise<ArrayBuffer> {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`Failed to load ephemeris ${url}: ${res.status}`);
+    return res.arrayBuffer();
   }
 
   static async load(url: string): Promise<Ephemeris> {
@@ -63,6 +65,33 @@ export class Ephemeris {
 
   has(target: number): boolean {
     return target === 0 || this.byTarget.has(target);
+  }
+
+  /**
+   * True if `position(target)` can be computed: the whole chain to the barycentre is
+   * loaded and, if `tdb` is given, covers that epoch.
+   */
+  available(target: number, tdb?: number): boolean {
+    const [start, end] = this.coverage(target);
+    return tdb === undefined ? start <= end : tdb >= start && tdb <= end;
+  }
+
+  /** TDB range over which `position(target)` works; empty (start > end) if not loaded. */
+  coverage(target: number): [number, number] {
+    let start = -Infinity, end = Infinity;
+    let body = target;
+    for (let guard = 0; guard < 10 && body !== 0; guard++) {
+      const seg = this.byTarget.get(body);
+      if (!seg && body > 100 && body < 1000 && body % 100 === 99) {
+        body = (body - 99) / 100;
+        continue;
+      }
+      if (!seg) return [1, 0];
+      start = Math.max(start, seg.init);
+      end = Math.min(end, seg.init + seg.nrec * seg.intlen);
+      body = seg.center;
+    }
+    return body === 0 ? [start, end] : [1, 0];
   }
 
   /** Position of `target` relative to its segment's center, as stored by JPL. */
@@ -116,4 +145,31 @@ export class Ephemeris {
     }
     return out;
   }
+}
+
+function parse(buffer: ArrayBuffer): Segment[] {
+  const view = new DataView(buffer);
+  if (view.getUint32(0, true) !== MAGIC) throw new Error('Not a SEPH ephemeris file');
+  const version = view.getUint32(4, true);
+  if (version !== 1 && version !== 2) throw new Error('Unsupported SEPH version');
+  const count = view.getUint32(8, true);
+  const segments: Segment[] = [];
+  for (let i = 0; i < count; i++) {
+    const at = HEADER_BYTES + i * SEGMENT_BYTES;
+    const ncoef = view.getUint32(at + 24, true);
+    const nrec = view.getUint32(at + 28, true);
+    const offset = view.getUint32(at + 32, true);
+    const n = nrec * 3 * ncoef;
+    segments.push({
+      center: view.getInt32(at, true),
+      target: view.getInt32(at + 4, true),
+      init: view.getFloat64(at + 8, true),
+      intlen: view.getFloat64(at + 16, true),
+      ncoef,
+      nrec,
+      // Version 2 stores float32 coefficients (moons: about 7 significant digits).
+      coef: version === 1 ? new Float64Array(buffer, offset, n) : new Float32Array(buffer, offset, n),
+    });
+  }
+  return segments;
 }
