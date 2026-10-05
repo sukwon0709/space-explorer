@@ -11,7 +11,7 @@ html, body { margin: 0; height: 100%; background: #000; color: var(--ink); font:
 #focus-name { font-size: 20px; font-weight: 600; }
 #focus-detail { color: var(--quiet); white-space: pre-line; }
 #bodies { position: fixed; top: 16px; right: 16px; display: flex; flex-direction: column; gap: 4px; }
-#bodies button, #layers button, #timebar button, #search, #date, #events { background: var(--panel); color: var(--ink); border: 1px solid rgba(255,255,255,0.12); border-radius: 6px; padding: 5px 10px; font: inherit; cursor: pointer; }
+#bodies button, #layers button, #timebar button, #search, #date, #events, #tours, #tour button { background: var(--panel); color: var(--ink); border: 1px solid rgba(255,255,255,0.12); border-radius: 6px; padding: 5px 10px; font: inherit; cursor: pointer; }
 #bodies button.focus, #layers button.active, #timebar button.active { border-color: var(--accent); color: var(--accent); }
 #timebar { position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%); display: flex; gap: 4px; align-items: center; padding: 6px; background: var(--panel); border-radius: 8px; max-width: calc(100vw - 32px); overflow-x: auto; }
 #utc { padding: 0 10px; font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -24,7 +24,7 @@ html, body { margin: 0; height: 100%; background: #000; color: var(--ink); font:
 .label.satellite::before { border: none; width: 0; }
 #search { width: 150px; margin-bottom: 4px; }
 #search.miss { border-color: #ff7a7a; }
-#date, #events { padding: 4px 6px; color-scheme: dark; }
+#date, #events, #tours { padding: 4px 6px; color-scheme: dark; }
 .label.moon, .label.asteroid { font-size: 12px; opacity: 0.85; }
 .label.moon::before, .label.asteroid::before { width: 5px; height: 5px; }
 .label.smallbody { color: #9fe3ff; }
@@ -49,3 +49,27 @@ html, body { margin: 0; height: 100%; background: #000; color: var(--ink); font:
 .eht-pair figcaption { font-size: 11px; color: var(--quiet); text-align: center; }
 .eht-caption { font-size: 11px; color: var(--quiet); white-space: pre-line; margin-top: 4px; }
 @media (max-width: 720px) { #eht { display: none; } }
+#tour { position: fixed; left: 50%; bottom: 80px; transform: translateX(-50%); width: min(560px, calc(100vw - 32px)); padding: 10px 14px; background: var(--panel); border-radius: 8px; }
+#tour[hidden] { display: none; }
+.tour-title { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--quiet); }
+.tour-caption { font-size: 14px; margin: 4px 0 8px; }
+.tour-controls { display: flex; gap: 4px; align-items: center; }
+.tour-controls button { padding: 3px 10px; }
+.tour-count { flex: 1; text-align: center; color: var(--quiet); font-size: 12px; font-variant-numeric: tabular-nums; }
+@media (max-width: 720px) { #tour { bottom: 170px; } }
+#stats { position: fixed; right: 16px; bottom: 6px; color: var(--quiet); font-size: 11px; font-variant-numeric: tabular-nums; }
+/* Phones: a compact HUD (tap to expand), search instead of the planet buttons, layers in one scrolling row. */
+@media (max-width: 720px) {
+  #hud { top: 8px; left: 8px; right: 8px; min-width: 0; padding: 8px 10px; font-size: 12px; cursor: pointer; }
+  #focus-name { font-size: 17px; }
+  #focus-detail { max-height: 4.2em; overflow: hidden; }
+  #hud.expanded #focus-detail { max-height: 50vh; overflow-y: auto; }
+  #bodies { top: auto; bottom: 116px; right: 8px; }
+  #bodies button { display: none; }
+  #search { margin-bottom: 0; }
+  #layers { top: auto; bottom: 74px; left: 8px; right: 8px; transform: none; overflow-x: auto; flex-wrap: nowrap; }
+  #layers button { white-space: nowrap; flex: none; }
+  #timebar { bottom: 16px; }
+  #tour { bottom: 160px; }
+  .tour-caption { font-size: 13px; }
+}

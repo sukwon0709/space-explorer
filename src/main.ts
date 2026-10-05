@@ -30,6 +30,7 @@ import { PC_KM, apparentMagnitude, namedStarPosition, parseStarIndex, yearsSince
 import { NAMED_SATELLITES, SatelliteLayer } from './render/satellites';
 import { formatDistance, formatUtc } from './ui/format';
 import { EVENTS } from './ui/events';
+import { TOURS, TourPlayer, type TourStep } from './ui/tours';
 import manifest from './generated/tiles.json';
 import cloudsMeta from './generated/clouds.json';
 import mapsMeta from './generated/maps.json';
@@ -107,7 +108,13 @@ async function main() {
 
   const canvas = document.getElementById('view') as HTMLCanvasElement;
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, logarithmicDepthBuffer: true, preserveDrawingBuffer: params.has('capture') });
-  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  // Quality: ?quality=low|high, else low on phones and tablets. Low draws at most one
+  // pixel per CSS pixel, loads fewer faint stars and traces black holes with longer steps.
+  const handheld = matchMedia('(pointer: coarse)').matches && Math.min(screen.width, screen.height) < 900;
+  const quality = params.get('quality') ?? (handheld ? 'low' : 'auto');
+  const maxPixelRatio = Math.min(devicePixelRatio, quality === 'low' ? 1 : 2);
+  let pixelRatio = maxPixelRatio;
+  renderer.setPixelRatio(pixelRatio);
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.1;
 
@@ -139,6 +146,7 @@ async function main() {
   // Black holes, with the S-stars and the companions drawn by the star field's shader.
   const bhs = new BlackHoles(stars.material, starIndex.teff, sstarData);
   scene.add(bhs.stars.points);
+  bhs.view.setQuality(quality === 'low' ? 'low' : quality === 'high' ? 'high' : 'normal');
 
   const textureLoader = new THREE.TextureLoader();
   const sunMap = await textureLoader.loadAsync(`${BASE}data/maps/sun.jpg`).catch(() => undefined);
@@ -507,16 +515,46 @@ async function main() {
 
   // ---- input ----------------------------------------------------------------
   // Drag pans across the ground on Earth and the Moon (orbits elsewhere);
-  // right-drag or shift-drag turns and tilts the view.
+  // right-drag or shift-drag turns and tilts the view. On touch screens, one finger
+  // drags, two fingers pinch to zoom and move together to turn and tilt.
   let drag: { button: number; shift: boolean } | undefined;
+  const pointers = new Map<number, { x: number; y: number }>();
+  const pinch = () => {
+    const [a, b] = [...pointers.values()];
+    return { d: Math.hypot(a.x - b.x, a.y - b.y), x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+  };
+  let pinchState: { d: number; x: number; y: number } | undefined;
   const pixelsPerRadian = () => innerHeight / (2 * Math.tan((camera.fov * DEG) / 2));
   canvas.addEventListener('contextmenu', (e) => e.preventDefault());
-  canvas.addEventListener('pointerdown', (e) => { drag = { button: e.button, shift: e.shiftKey }; canvas.setPointerCapture(e.pointerId); });
-  canvas.addEventListener('pointerup', () => { drag = undefined; });
+  canvas.addEventListener('pointerdown', (e) => {
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    canvas.setPointerCapture(e.pointerId);
+    drag = pointers.size === 1 ? { button: e.button, shift: e.shiftKey } : undefined;
+    pinchState = pointers.size === 2 ? pinch() : undefined;
+  });
+  const release = (e: PointerEvent) => {
+    pointers.delete(e.pointerId);
+    drag = undefined;
+    pinchState = undefined;
+  };
+  canvas.addEventListener('pointerup', release);
+  canvas.addEventListener('pointercancel', release);
   canvas.addEventListener('pointermove', (e) => {
+    const last = pointers.get(e.pointerId);
+    if (!last) return;
+    const dx = e.clientX - last.x, dy = e.clientY - last.y;
+    last.x = e.clientX;
+    last.y = e.clientY;
+    if (pinchState && pointers.size === 2) {
+      const now = pinch();
+      if (now.d > 0 && pinchState.d > 0) rig.zoom(Math.log(pinchState.d / now.d) / 0.0015);
+      rig.orbit(now.x - pinchState.x, now.y - pinchState.y);
+      pinchState = now;
+      return;
+    }
     if (!drag) return;
-    if (rig.anchor && drag.button === 0 && !drag.shift) rig.pan(e.movementX, e.movementY, pixelsPerRadian(), targets.get(rig.focus)!.radius);
-    else rig.orbit(e.movementX, e.movementY);
+    if (rig.anchor && drag.button === 0 && !drag.shift) rig.pan(dx, dy, pixelsPerRadian(), targets.get(rig.focus)!.radius);
+    else rig.orbit(dx, dy);
   });
   canvas.addEventListener('wheel', (e) => { e.preventDefault(); rig.zoom(e.deltaY); }, { passive: false });
 
@@ -575,6 +613,45 @@ async function main() {
     });
   });
 
+  // On phones the HUD shows a few lines; a tap shows the rest.
+  document.getElementById('hud')!.addEventListener('click', (e) => (e.currentTarget as HTMLElement).classList.toggle('expanded'));
+
+  // ---- guided tours -----------------------------------------------------------
+  const tourSelect = document.getElementById('tours') as HTMLSelectElement;
+  TOURS.forEach((t, k) => {
+    const o = document.createElement('option');
+    o.value = String(k);
+    o.textContent = t.title;
+    tourSelect.append(o);
+  });
+  const tourStep = (step: TourStep) => {
+    const id = byName.get(step.focus.toLowerCase());
+    if (id === undefined) return;
+    if (step.radio !== undefined) {
+      layers.radio = step.radio;
+      radioButton.classList.toggle('active', step.radio);
+    }
+    prepare(id);
+    waitFor(() => id >= ASTEROID_ID || system.available(id), 30000).then(() => {
+      const v = viewFor(id);
+      rig.flyTo(id, step.dist ?? v.distance, performance.now() / 1000, step.yaw ?? v.yaw, step.pitch ?? v.pitch, v.anchor, step.flight ?? 6);
+      lookUp = 0;
+      fov = 50;
+      skyAim = undefined;
+    });
+  };
+  const tours = new TourPlayer(document.getElementById('tour')!, tourStep);
+  tourSelect.addEventListener('change', () => {
+    const tour = TOURS[Number(tourSelect.value)];
+    tourSelect.value = '';
+    if (tour) tours.start(tour);
+  });
+  // ?tour=1&step=3 starts a tour (numbered from 1) at a step.
+  if (params.has('tour')) {
+    const tour = TOURS[Number(params.get('tour')) - 1];
+    if (tour) tours.start(tour, Number(params.get('step') ?? 1) - 1);
+  }
+
   const resize = () => {
     renderer.setSize(innerWidth, innerHeight, false);
     camera.aspect = innerWidth / innerHeight;
@@ -594,9 +671,44 @@ async function main() {
       'Saturn rings: Cassini RSS',
       satelliteSource && `Satellites: ${satelliteSource}`,
       'Stars: ESA Gaia DR3, Hipparcos (XHIP), Bailer-Jones distances; dust: Edenhofer et al. 2024; exoplanets: NASA Exoplanet Archive; constellations: Stellarium',
+      'Galaxies: UNGC, Cosmicflows-4, 2MRS, 6dFGS, SDSS; images: DSS2; CMB: Planck',
+      'Black holes: GRAVITY, Gillessen et al. 2017, Gaia, Miller-Jones et al. 2021; EHT images: EHT Collaboration (CC BY 4.0)',
     ].filter(Boolean).join(' · ');
   }
   updateCredits();
+
+  // ---- frame rate ---------------------------------------------------------------
+  // The drawing resolution follows the frame rate: down when frames take over 1/30 s
+  // (as the ray-traced black holes can on a laptop), back up when there is room.
+  // ?stats=1 shows the frame rate.
+  const adaptive = quality !== 'high' && !params.has('capture');
+  const statsEl = params.has('stats') ? document.body.appendChild(document.createElement('div')) : undefined;
+  if (statsEl) statsEl.id = 'stats';
+  let frameTime = 1 / 60;
+  let lastAdapt = 0;
+  const setPixelRatio = (ratio: number) => {
+    pixelRatio = ratio;
+    renderer.setPixelRatio(ratio);
+    // Point sizes are in device pixels: every layer that draws points needs the ratio.
+    scene.traverse((o) => {
+      const u = ((o as THREE.Mesh).material as THREE.ShaderMaterial | undefined)?.uniforms;
+      if (u?.uPixelRatio) u.uPixelRatio.value = ratio;
+      if (u?.pixelRatio) u.pixelRatio.value = ratio;
+    });
+  };
+  const adaptResolution = (dt: number) => {
+    frameTime += (dt - frameTime) * 0.1;
+    const t = performance.now() / 1000;
+    if (statsEl && frameNumber % 10 === 0) statsEl.textContent = `${(1 / frameTime).toFixed(0)} fps · ${pixelRatio.toFixed(2)}×`;
+    if (!adaptive || t - lastAdapt < 1.5) return;
+    if (frameTime > 1 / 30 && pixelRatio > 0.5) {
+      setPixelRatio(Math.max(0.5, pixelRatio * 0.8));
+      lastAdapt = t;
+    } else if (frameTime < 1 / 50 && pixelRatio < maxPixelRatio) {
+      setPixelRatio(Math.min(maxPixelRatio, pixelRatio * 1.15));
+      lastAdapt = t + 3; // rise slowly
+    }
+  };
 
   // ---- frame loop -----------------------------------------------------------
   const nameEl = document.getElementById('focus-name')!;
@@ -623,6 +735,8 @@ async function main() {
     updateOrientation();
     const focus = targets.get(rig.focus)!;
     rig.minDistance = rig.anchor ? 0.0015 : isDeep(focus.id) ? focus.radius * 0.02 : isHole(focus.id) ? bhs.minDistance(focus.id) : focus.radius * 1.0002;
+    tours.update(now, rig.flying);
+    adaptResolution(dt);
     const { eye, target, up, offset } = rig.solve(frameOf, now);
     // Near a black hole the camera is placed from the hole itself: its scene position
     // (hundreds of parsecs out) is far too coarse for a horizon tens of km across.
@@ -737,7 +851,7 @@ async function main() {
     su.uMsat.value = limit - 6.5;
     su.uPixelsPerRadian.value = ppr;
     su.uBrightness.value = 1 - 0.98 * daylight;
-    stars.loadLimit = limit + 1.6;
+    stars.loadLimit = limit + (quality === 'low' ? 0.6 : 1.6);
     stars.update(camPc, years);
     // Diffuse light (the Milky Way's glow, galaxies, nebulae): surface brightness mu
     // (V mag/arcsec^2) shows as 10^(-0.4 (mu - muRef)). A star of the saturation
@@ -1040,7 +1154,7 @@ async function main() {
     if (document.activeElement !== dateInput && frameNumber % 15 === 0) dateInput.value = new Date(clock.utc).toISOString().slice(0, 16);
     const pending = [...surfaces.values()].reduce((n, x) => n + x.globe.pending, 0) + loading + stars.pending;
     document.body.dataset.ready = 'true';
-    document.body.dataset.tiles = pending === 0 ? 'idle' : 'loading';
+    document.body.dataset.tiles = pending === 0 && !rig.flying ? 'idle' : 'loading';
     requestAnimationFrame(frame);
   };
   requestAnimationFrame(frame);

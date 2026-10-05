@@ -70,6 +70,8 @@ const views = {
   'gaia-bh3': `focus=Gaia%20BH3&t=${T}`,
   'cygnus-x1': `focus=Cygnus%20X-1&t=${T}`,
   'cygnus-x1-system': `focus=Cygnus%20X-1&t=${T}&dist=2e7&pitch=0.25`,
+  'tour-edge': `t=${T}&tour=1&step=14`,
+  'tour-sgr-a': `t=${T}&tour=2&step=6`,
 };
 const only = process.argv[3]?.split(',');
 
