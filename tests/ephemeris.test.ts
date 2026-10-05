@@ -2,10 +2,10 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { Ephemeris } from '../src/core/ephemeris';
 
-const file = readFileSync(new URL('../public/data/de421.bin', import.meta.url));
+const file = readFileSync(new URL('../public/data/de440.bin', import.meta.url));
 const ephemeris = new Ephemeris(file.buffer.slice(file.byteOffset, file.byteOffset + file.byteLength));
 const reference: { cases: Array<{ center: number; target: number; tdb: number; km: number[] }> } = JSON.parse(
-  readFileSync(new URL('./fixtures/de421-reference.json', import.meta.url), 'utf8'),
+  readFileSync(new URL('./fixtures/de440-reference.json', import.meta.url), 'utf8'),
 );
 
 describe('Ephemeris', () => {
@@ -18,6 +18,21 @@ describe('Ephemeris', () => {
     }
     expect(reference.cases.length).toBeGreaterThan(900);
     expect(worst).toBeLessThan(0.001); // km
+  });
+
+  it('matches JPL Horizons (an independent JPL service) to within 1 km for every body', () => {
+    const horizons: { cases: Array<{ target: number; tdb: number; km: number[] }> } = JSON.parse(
+      readFileSync(new URL('./fixtures/horizons-reference.json', import.meta.url), 'utf8'),
+    );
+    const worst = new Map<number, number>();
+    for (const c of horizons.cases) {
+      const p = ephemeris.position(c.target, c.tdb);
+      const err = Math.hypot(p[0] - c.km[0], p[1] - c.km[1], p[2] - c.km[2]);
+      worst.set(c.target, Math.max(worst.get(c.target) ?? 0, err));
+    }
+    console.log('Worst difference from Horizons per body, metres:', Object.fromEntries([...worst].map(([id, km]) => [id, +(km * 1000).toFixed(3)])));
+    expect(horizons.cases.length).toBe(121);
+    for (const km of worst.values()) expect(km).toBeLessThan(1);
   });
 
   it('chains segments to the barycentre (Earth = EMB + Earth offset)', () => {

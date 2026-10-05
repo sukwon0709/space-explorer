@@ -14,7 +14,7 @@ const BASE = import.meta.env.BASE_URL;
 
 async function main() {
   const [ephemeris, starData] = await Promise.all([
-    Ephemeris.load(`${BASE}data/de421.bin`),
+    Ephemeris.load(`${BASE}data/de440.bin`),
     fetch(`${BASE}data/stars.bin`).then((r) => r.arrayBuffer()),
   ]);
 
