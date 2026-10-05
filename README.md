@@ -24,7 +24,7 @@ New URL parameters: `look` turns the view up from the ground toward the sky (deg
 
 - Moon and asteroid positions cover 1960–2060, like DE440 in the app. The two-body asteroid and comet orbits leave out planetary perturbations, which is fine for drawing them but drifts by thousands of km over years.
 - The Sun's map is one day's view from Earth. The far side is shown as quiet Sun, and spots change from day to day.
-- Parts of some moons were never imaged (Triton 61% coverage, Pluto 68%, Charon 66%). Those areas show the body's average colour. Venus and Titan have no visible-light surface, so they are their cloud colour. Mimas, Hyperion, Phoebe, the Uranian moons, Deimos, Pallas and Hygiea have no map yet. Vesta's map uses the IAU 2015 prime meridian, which was not checked against the mosaic.
+- Parts of some moons were never imaged (Triton 61% coverage, Pluto 68%, Charon 66%). Those areas show the body's average colour. Venus and Titan have no visible-light surface, so they are their cloud colour. Mimas, Hyperion, Phoebe, the Uranian moons, Deimos, Pallas and Hygiea have no map yet. Vesta's map uses the IAU 2015 prime meridian, which was not checked against the mosaic. Phobos's mosaic is lit differently on either side of 180° longitude, so its edges are cross-faded and a soft brightness step remains there.
 - Shadows treat each occluder as a sphere. The corona is a smooth model without streamers. The red of a lunar eclipse is an approximate colour, not computed from Earth's atmosphere.
 - Each body has one ring shadow source, its own rings. Rings do not shadow moons.
 

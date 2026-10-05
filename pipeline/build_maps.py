@@ -66,6 +66,9 @@ USGS_MAPS = [
     ("vesta", "Vesta_Dawn_FC_HAMO_Mosaic_Global_74ppd", 2048, "#a8a39b", "NASA/JPL Dawn FC, USGS"),
 ]
 
+# Maps whose left and right edges do not match in brightness.
+SEAMED = {"phobos"}
+
 OPAL_MAPS = [
     # name, path, (equatorial, polar radius) used for the planetographic grid, channel order
     ("jupiter", "cycle32/jupiter/hlsp_opal_hst_wfc3-uvis_jupiter-2025a_f395n-f502n-f631n_v1_globalmap.tif", (71492, 66854), "rgb"),
@@ -192,6 +195,36 @@ def fill_gaps(img, valid, min_cover=0.05):
     return out
 
 
+def blend_seam(img, columns):
+    """Mend mosaics whose left and right edges do not meet (Phobos's is lit differently
+    on either side of 180 degrees, and its last columns are partly empty). Empty columns at
+    either edge are redrawn by interpolating across the edge, then each row's remaining
+    step is cross-faded over `columns` on both sides."""
+    out = img.copy()
+    w = img.shape[1]
+    # Columns partly outside the mosaic (box-filtered against its empty border).
+    dim = (img.max(axis=2) <= 0.5).mean(axis=0) > 0.02
+    dim |= img.mean(axis=(0, 2)) < 0.5 * np.median(img.mean(axis=(0, 2)))
+    lo = 0
+    while lo < w // 64 and dim[lo]:
+        lo += 1
+    hi = w
+    while hi > w - w // 64 and dim[hi - 1]:
+        hi -= 1
+    gap = (w - hi) + lo
+    if gap:
+        a, b = img[:, hi - 1], img[:, lo]
+        for k in range(gap):
+            t = (k + 1) / (gap + 1)
+            out[:, (hi + k) % w] = a * (1 - t) + b * t
+    step = out[:, :4].mean(axis=1) - out[:, -4:].mean(axis=1)
+    for k in range(columns):
+        f = 0.5 * (1 - k / columns)
+        out[:, k] -= f * step
+        out[:, -1 - k] += f * step
+    return out
+
+
 def planetographic_to_centric(img, radii, lat_top=90.0, lat_bottom=-90.0):
     """Resample rows from planetographic latitude to planetocentric (-90..90)."""
     a, b = radii
@@ -214,6 +247,8 @@ def save(img_srgb, out_dir, name):
 
 def build_usgs(cache, out_dir, name, src, width, tint, credit):
     img = usgs_map(cache, src, width)
+    if name in SEAMED:
+        img = blend_seam(img, width // 32)
     valid = img.max(axis=2) > 0.5
     img = fill_gaps(img, valid)
     if img.shape[2] == 1 or tint:

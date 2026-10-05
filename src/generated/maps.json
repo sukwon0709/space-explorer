@@ -130,12 +130,12 @@
   "source": "NASA/ESA Hubble OPAL 2025 latitude profile (547 nm), true colour from Irwin et al. 2024"
  },
  "phobos": {
-  "coverage": 0.995,
+  "coverage": 0.998,
   "kind": "surface",
   "mean": [
-   0.24953,
-   0.20776,
-   0.17155
+   0.24962,
+   0.20786,
+   0.1716
   ],
   "source": "ESA/DLR/FU Berlin Mars Express SRC, USGS"
  },
