@@ -1,45 +1,102 @@
 import { ECLIPSE_GLSL } from './shadow';
 
 /**
- * Earth's atmosphere: single scattering by air molecules (Rayleigh) and aerosols (Mie),
- * with ozone absorption, integrated along each view ray. Coefficients are the
- * standard sea-level values used by Bruneton's precomputed model (2017 reference
- * implementation), in km^-1. Everything works in the body frame with z scaled by a/b,
- * which turns the WGS84 ellipsoid into a sphere of radius a.
+ * A planet's atmosphere in single scattering: small molecules (Rayleigh), aerosols
+ * (Mie, with a Henyey-Greenstein-like phase function) and an absorbing ozone layer,
+ * integrated along each view ray. Coefficients are km^-1 at the bottom radius, per
+ * colour channel (red, green, blue). Everything works in the body frame with z scaled
+ * by a/b, which turns an ellipsoid of revolution into a sphere of radius a.
  */
-export const ATMOSPHERE = {
+export interface AtmosphereParams {
+  bottom: number;
+  top: number;
+  rayleigh: [number, number, number];
+  rayleighHeight: number;
+  /** Aerosol scattering and extinction (scattering / extinction = single-scattering albedo). */
+  mieScattering: [number, number, number];
+  mieExtinction: [number, number, number];
+  mieHeight: number;
+  /** Phase function asymmetry: larger is more forward scattering. */
+  mieG: [number, number, number];
+  ozone: [number, number, number];
+  /** Densities stay constant below this height (km): the ground can lie below `bottom`. */
+  floor: number;
+  /**
+   * Single scattering leaves out light scattered more than once. In Earth's thin air
+   * that is a small part of the sky; in Mars's dust it is most of it. A plain factor on
+   * the scattered light stands in for it.
+   */
+  multiple: number;
+}
+
+/** Earth: the standard sea-level values of Bruneton's precomputed model (2017 reference implementation). */
+export const ATMOSPHERE: AtmosphereParams = {
   bottom: 6378.137,
   top: 6378.137 + 80,
   rayleigh: [5.802e-3, 13.558e-3, 33.1e-3],
   rayleighHeight: 8,
-  mieScattering: 3.996e-3,
-  mieExtinction: 4.44e-3,
+  mieScattering: [3.996e-3, 3.996e-3, 3.996e-3],
+  mieExtinction: [4.44e-3, 4.44e-3, 4.44e-3],
   mieHeight: 1.2,
-  mieG: 0.8,
+  mieG: [0.8, 0.8, 0.8],
   ozone: [0.65e-3, 1.881e-3, 0.085e-3],
+  floor: 0,
+  multiple: 1,
 };
 
-export const ATMOSPHERE_GLSL = /* glsl */ `
+/**
+ * Mars: almost all of its sky is dust. CO2 at about 6 mbar and 210 K has 0.8% of the
+ * molecules of sea-level air and scatters 2.4 times as strongly per molecule, so its
+ * Rayleigh scattering is 2% of Earth's. The dust is a typical clear-season load:
+ * vertical optical depth 0.5 above the 3389.5 km datum (about 0.42 above Jezero), with
+ * an 11 km scale height. Its grains (about 1.5 µm) absorb blue: single-scattering
+ * albedos of about 0.97, 0.92 and 0.72 in red, green and blue, and they throw blue light
+ * further forward (Wolff et al. 2009, CRISM). So the daytime sky is butterscotch and the
+ * sky around the setting Sun is blue. At this dust load most of the sky's light has been
+ * scattered more than once; a factor of 3 on the single-scattered light makes the sky
+ * above Jezero about as bright as the sunlit ground, as it is in Mastcam-Z images.
+ */
+const MARS_DUST = 0.5 / 11;
+export const MARS_ATMOSPHERE: AtmosphereParams = {
+  bottom: 3389.5,
+  top: 3389.5 + 80,
+  rayleigh: [0.02 * 5.802e-3, 0.02 * 13.558e-3, 0.02 * 33.1e-3],
+  rayleighHeight: 11.1,
+  mieScattering: [0.97 * MARS_DUST, 0.92 * MARS_DUST, 0.72 * MARS_DUST],
+  mieExtinction: [MARS_DUST, MARS_DUST, MARS_DUST],
+  mieHeight: 11,
+  mieG: [0.63, 0.66, 0.71],
+  ozone: [0, 0, 0],
+  floor: -10,
+  multiple: 3,
+};
+
+const vec3 = (v: number[]) => `vec3(${v.map((x) => x.toExponential(4)).join(', ')})`;
+
+export function atmosphereGlsl(a: AtmosphereParams): string {
+  return /* glsl */ `
 ${ECLIPSE_GLSL}
-const float ATM_BOTTOM = ${ATMOSPHERE.bottom.toFixed(3)};
-const float ATM_TOP = ${ATMOSPHERE.top.toFixed(3)};
-const vec3 RAYLEIGH = vec3(${ATMOSPHERE.rayleigh.map((v) => v.toExponential(4)).join(', ')});
-const float RAYLEIGH_H = ${ATMOSPHERE.rayleighHeight.toFixed(1)};
-const float MIE_S = ${ATMOSPHERE.mieScattering.toExponential(4)};
-const float MIE_E = ${ATMOSPHERE.mieExtinction.toExponential(4)};
-const float MIE_H = ${ATMOSPHERE.mieHeight.toFixed(2)};
-const float MIE_G = ${ATMOSPHERE.mieG.toFixed(2)};
-const vec3 OZONE = vec3(${ATMOSPHERE.ozone.map((v) => v.toExponential(4)).join(', ')});
+const float ATM_BOTTOM = ${a.bottom.toFixed(3)};
+const float ATM_TOP = ${a.top.toFixed(3)};
+const float ATM_FLOOR = ${a.floor.toFixed(2)};
+const vec3 RAYLEIGH = ${vec3(a.rayleigh)};
+const float RAYLEIGH_H = ${a.rayleighHeight.toFixed(1)};
+const vec3 MIE_S = ${vec3(a.mieScattering)};
+const vec3 MIE_E = ${vec3(a.mieExtinction)};
+const float MIE_H = ${a.mieHeight.toFixed(2)};
+const vec3 MIE_G = vec3(${a.mieG.map((g) => g.toFixed(3)).join(', ')});
+const vec3 OZONE = ${vec3(a.ozone)};
 const float PI_A = 3.14159265;
+const float ATM_MULTIPLE = ${a.multiple.toFixed(2)};
 
 // Densities relative to sea level: (rayleigh, mie, ozone). Ozone is a tent at 25 km.
 vec3 atmDensity(float h) {
-  h = max(h, 0.0);
+  h = max(h, ATM_FLOOR);
   return vec3(exp(-h / RAYLEIGH_H), exp(-h / MIE_H), max(0.0, 1.0 - abs(h - 25.0) / 15.0));
 }
 
 vec3 atmExtinction(vec3 d) {
-  return RAYLEIGH * d.x + vec3(MIE_E) * d.y + OZONE * d.z;
+  return RAYLEIGH * d.x + MIE_E * d.y + OZONE * d.z;
 }
 
 // Distances along the ray to a sphere of radius r centred at the origin; (-1,-1) if missed.
@@ -72,9 +129,9 @@ vec3 atmSunTransmittance(vec3 p, vec3 sunDir) {
 }
 
 float rayleighPhase(float mu) { return 3.0 / (16.0 * PI_A) * (1.0 + mu * mu); }
-float miePhase(float mu) {
-  float g2 = MIE_G * MIE_G;
-  return 3.0 / (8.0 * PI_A) * (1.0 - g2) * (1.0 + mu * mu) / ((2.0 + g2) * pow(1.0 + g2 - 2.0 * MIE_G * mu, 1.5));
+vec3 miePhase(float mu) {
+  vec3 g2 = MIE_G * MIE_G;
+  return 3.0 / (8.0 * PI_A) * (1.0 - g2) * (1.0 + mu * mu) / ((2.0 + g2) * pow(1.0 + g2 - 2.0 * MIE_G * mu, vec3(1.5)));
 }
 
 // Light scattered toward the camera along ro + rd*t for t in [t0, t1], and the
@@ -96,7 +153,7 @@ void atmScatter(vec3 ro, vec3 rd, float t0, float t1, vec3 sunDir, out vec3 insc
     sumM += t * d.y;
   }
   float mu = dot(rd, sunDir);
-  inscatter = sumR * RAYLEIGH * rayleighPhase(mu) + sumM * MIE_S * miePhase(mu);
+  inscatter = (sumR * RAYLEIGH * rayleighPhase(mu) + sumM * MIE_S * miePhase(mu)) * ATM_MULTIPLE;
   transmittance = exp(-atmExtinction(depth));
 }
 
@@ -116,3 +173,6 @@ void atmBetween(vec3 cam, vec3 p, vec3 sunDir, out vec3 inscatter, out vec3 tran
   atmScatter(cam, rd, t0, t1, sunDir, inscatter, transmittance);
 }
 `;
+}
+
+export const ATMOSPHERE_GLSL = atmosphereGlsl(ATMOSPHERE);

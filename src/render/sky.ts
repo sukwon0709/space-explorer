@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { Vec3 } from '../core/ephemeris';
 import type { Globe, GlobeFrame } from './globe';
-import { ATMOSPHERE, ATMOSPHERE_GLSL } from './atmosphere';
+import { ATMOSPHERE, atmosphereGlsl } from './atmosphere';
 
 /**
  * A latitude/longitude grid on the unit sphere in body-fixed axes (z = north pole),
@@ -46,7 +46,7 @@ void main() {
 }
 `;
 
-const skyFragment = /* glsl */ `
+const skyFragment = (atmosphere: string) => /* glsl */ `
 uniform vec3 uSun;
 uniform mat3 uSceneToBody;
 uniform vec3 uCamBody;
@@ -55,7 +55,7 @@ uniform float uSunIntensity;
 varying vec3 vRel;
 #include <common>
 #include <logdepthbuf_pars_fragment>
-${ATMOSPHERE_GLSL}
+${atmosphere}
 void main() {
   #include <logdepthbuf_fragment>
   vec3 cam = vec3(uCamBody.xy, uCamBody.z * uFlatten);
@@ -76,7 +76,7 @@ void main() {
 }
 `;
 
-const cloudFragment = /* glsl */ `
+const cloudFragment = (atmosphere: string) => /* glsl */ `
 uniform sampler2D uClouds;
 uniform vec3 uSun;
 uniform mat3 uSceneToBody;
@@ -87,7 +87,7 @@ varying vec3 vRel;
 varying vec2 vUv;
 #include <common>
 #include <logdepthbuf_pars_fragment>
-${ATMOSPHERE_GLSL}
+${atmosphere}
 void main() {
   #include <logdepthbuf_fragment>
   float cover = texture2D(uClouds, vUv).r;
@@ -111,7 +111,7 @@ void main() {
 }
 `;
 
-/** Earth's sky shell and cloud layer, placed relative to the camera every frame. */
+/** A planet's sky shell (and Earth's cloud layer), placed relative to the camera every frame. */
 export class EarthSky {
   readonly group = new THREE.Group();
   private readonly shell: THREE.Mesh;
@@ -120,12 +120,14 @@ export class EarthSky {
 
   constructor(globe: Globe, clouds?: THREE.Texture, cloudAltitude = 6) {
     const uniforms = globe.uniforms;
-    const top = ATMOSPHERE.top;
+    const atmosphere = globe.atmosphere ?? ATMOSPHERE;
+    const glsl = atmosphereGlsl(atmosphere);
+    const top = atmosphere.top;
     this.shell = new THREE.Mesh(
       latLonSphere(128, 64),
       new THREE.ShaderMaterial({
         vertexShader: shellVertex,
-        fragmentShader: skyFragment,
+        fragmentShader: skyFragment(glsl),
         uniforms,
         side: THREE.BackSide,
         transparent: true,
@@ -150,7 +152,7 @@ export class EarthSky {
         latLonSphere(512, 256),
         new THREE.ShaderMaterial({
           vertexShader: shellVertex,
-          fragmentShader: cloudFragment,
+          fragmentShader: cloudFragment(glsl),
           uniforms: { ...uniforms, uClouds: { value: clouds } },
           side: THREE.DoubleSide,
           transparent: true,

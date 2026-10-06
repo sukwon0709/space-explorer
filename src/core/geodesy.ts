@@ -9,6 +9,8 @@ export interface Shape {
 export const WGS84: Shape = { a: 6378.137, b: 6356.752314245 };
 /** LOLA's reference sphere for lunar heights. */
 export const MOON_SPHERE: Shape = { a: 1737.4, b: 1737.4 };
+/** MOLA's reference sphere for Mars radii; latitudes are planetocentric, as MOLA's are. */
+export const MARS_SPHERE: Shape = { a: 3396.0, b: 3396.0 };
 
 /** Body-fixed position (km) of a point at geodetic longitude/latitude (radians) and height (km). */
 export function geodeticToBody(shape: Shape, lon: number, lat: number, h: number, out: Vec3 = [0, 0, 0]): Vec3 {

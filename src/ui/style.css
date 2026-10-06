@@ -77,7 +77,7 @@ html, body { margin: 0; height: 100%; background: #000; color: var(--ink); font:
 #fly { border-color: var(--accent); color: var(--accent); margin-bottom: 4px; }
 #fly.active { background: rgba(127, 176, 255, 0.18); }
 #flight { position: fixed; left: 16px; bottom: 80px; padding: 8px 12px; background: var(--panel); border-radius: 8px; max-width: min(420px, calc(100vw - 32px)); font-variant-numeric: tabular-nums; }
-#flight[hidden], #flight-pad[hidden], .flight-mark[hidden], .flight-help[hidden] { display: none; }
+#flight[hidden], #flight-pad[hidden], #walk-pad[hidden], .flight-mark[hidden], .flight-help[hidden] { display: none; }
 .flight-lines { white-space: pre-line; }
 .flight-help-button { margin-top: 6px; background: none; color: var(--accent); border: 1px solid rgba(127, 176, 255, 0.4); border-radius: 6px; padding: 2px 8px; font: inherit; font-size: 12px; cursor: pointer; }
 .flight-help { margin-top: 6px; font-size: 12px; color: var(--quiet); line-height: 1.6; }
@@ -96,13 +96,16 @@ html, body { margin: 0; height: 100%; background: #000; color: var(--ink); font:
 .flight-mark.target::before { content: ''; position: absolute; left: 2px; top: 50%; width: 12px; height: 12px; border: 1.5px solid currentColor; transform: translateY(-50%) rotate(45deg); }
 .flight-mark.target.edge { opacity: 0.8; }
 body.flying #view { cursor: crosshair; }
-#flight-pad { position: fixed; left: 8px; right: 8px; bottom: 120px; display: flex; justify-content: space-between; pointer-events: none; }
+#flight-pad, #walk-pad { position: fixed; left: 8px; right: 8px; bottom: 120px; display: flex; justify-content: space-between; pointer-events: none; }
 .pad-group { display: grid; grid-template-columns: repeat(2, 64px); gap: 6px; pointer-events: auto; }
-#flight-pad button { height: 48px; background: var(--panel); color: var(--ink); border: 1px solid rgba(255,255,255,0.18); border-radius: 10px; font: inherit; touch-action: none; user-select: none; -webkit-user-select: none; }
-#flight-pad button:active { border-color: var(--accent); color: var(--accent); }
-@media (pointer: fine) { #flight-pad { display: none; } }
+#flight-pad button, #walk-pad button { height: 48px; background: var(--panel); color: var(--ink); border: 1px solid rgba(255,255,255,0.18); border-radius: 10px; font: inherit; touch-action: none; user-select: none; -webkit-user-select: none; }
+#flight-pad button:active, #walk-pad button:active { border-color: var(--accent); color: var(--accent); }
+@media (pointer: fine) { #flight-pad, #walk-pad { display: none; } }
+#walk { margin-bottom: 4px; }
+#walk.active { border-color: var(--accent); color: var(--accent); background: rgba(127, 176, 255, 0.18); }
+body.walking #view { cursor: grab; }
 @media (max-width: 720px) {
   #flight { left: 8px; right: 8px; bottom: auto; top: 96px; max-width: none; font-size: 12px; }
-  #flight-pad { bottom: 160px; }
+  #flight-pad, #walk-pad { bottom: 160px; }
   .flight-message { top: 40%; font-size: 14px; }
 }

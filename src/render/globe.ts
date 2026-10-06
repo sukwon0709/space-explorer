@@ -4,7 +4,7 @@ import { bodyToGeodetic, type Shape } from '../core/geodesy';
 import type { Mat3 } from '../core/orientation';
 import { buildTileGeometry, type TileGeometry } from '../core/terrainmesh';
 import { tileBounds, tileSize, type HeightTile, type TileRef, type TileStore } from '../core/tilestore';
-import { ATMOSPHERE_GLSL } from './atmosphere';
+import { ATMOSPHERE, MARS_ATMOSPHERE, atmosphereGlsl, type AtmosphereParams } from './atmosphere';
 
 const DEG = Math.PI / 180;
 const GRID = 65;
@@ -13,6 +13,8 @@ const MAX_LEVEL = 20;
 const TEXEL_PIXELS = 1.15;
 /** How many levels a tile may refine past its deepest height or colour data. */
 const EXTRA_LEVELS = 3;
+
+export type SurfaceKind = 'earth' | 'mars' | 'airless';
 
 /** Per-frame inputs, all float64 until they are handed to three.js. */
 export interface GlobeFrame {
@@ -60,7 +62,9 @@ interface TextureHandle {
 
 const vertexShader = /* glsl */ `
 attribute float water;
+attribute vec2 detail;
 varying vec2 vUv;
+varying vec2 vDetail;
 varying vec3 vNormal;
 varying vec3 vRel;
 varying float vWater;
@@ -70,13 +74,14 @@ void main() {
   vUv = uv;
   vNormal = normal;
   vWater = water;
+  vDetail = detail;
   vRel = (modelMatrix * vec4(position, 1.0)).xyz; // camera-relative, scene axes
   gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
   #include <logdepthbuf_vertex>
 }
 `;
 
-const fragmentShader = /* glsl */ `
+const fragmentShader = (atmosphere: string) => /* glsl */ `
 uniform sampler2D uDay;
 uniform vec4 uDayXform;
 uniform sampler2D uNight;
@@ -88,22 +93,48 @@ uniform vec3 uCamBody;
 uniform float uFlatten;
 uniform float uSunIntensity;
 uniform vec3 uEclTint;
+uniform float uAlbedoScale;
+uniform sampler2D uDetailMap;
+uniform float uDetail;
 varying vec2 vUv;
+varying vec2 vDetail;
 varying vec3 vNormal;
 varying vec3 vRel;
 varying float vWater;
 #include <common>
 #include <logdepthbuf_pars_fragment>
-${ATMOSPHERE_GLSL}
+${atmosphere}
+
+// Below the resolution of the data, the ground gets a fine grain: a periodic noise
+// (tiling every DETAIL_PERIOD metres, see terrainmesh.ts) at three scales, which fades
+// in only within a few tens of metres. It changes brightness and tilts the normal a
+// little; it adds no information about the real surface.
+vec3 surfaceDetail(vec3 n, float dist, out float shade) {
+  shade = 1.0;
+  float w = uDetail * (1.0 - smoothstep(15.0, 120.0, dist * 1000.0));
+  if (w <= 0.0) return n;
+  vec2 p = vDetail;
+  vec3 a = texture2D(uDetailMap, p / 3.125).rgb - 0.5;
+  vec3 b = texture2D(uDetailMap, p / 12.5 + 0.37).rgb - 0.5;
+  vec3 c = texture2D(uDetailMap, p / 0.78125 + 0.71).rgb - 0.5;
+  shade = 1.0 + w * (0.35 * a.r + 0.25 * b.r + 0.2 * c.r);
+  // Tilt the normal by the noise's slope (green/blue hold its x/y derivatives).
+  vec3 t = normalize(cross(vec3(0.0, 0.0, 1.0), n) + vec3(1e-6, 0.0, 0.0));
+  vec3 bt = cross(n, t);
+  vec2 slope = 0.5 * a.gb + 0.35 * b.gb + 0.35 * c.gb;
+  return normalize(n + w * (t * slope.x + bt * slope.y));
+}
 
 vec3 srgbToLinear(vec3 c) { return pow(c, vec3(2.2)); }
 
 void main() {
   #include <logdepthbuf_fragment>
-  vec3 albedo = srgbToLinear(texture2D(uDay, uDayXform.xy + vUv * uDayXform.zw).rgb);
-  vec3 n = normalize(vNormal);
+  vec3 albedo = srgbToLinear(texture2D(uDay, uDayXform.xy + vUv * uDayXform.zw).rgb) * uAlbedoScale;
   vec3 rel = uSceneToBody * vRel;
   vec3 viewDir = normalize(rel);
+  float grain;
+  vec3 n = surfaceDetail(normalize(vNormal), length(rel), grain);
+  albedo *= grain;
   float ndl = dot(n, uSun);
   float eclipse = eclipseVisibility(uCamBody + rel);
 #ifdef ATMOSPHERE
@@ -113,9 +144,20 @@ void main() {
   vec3 up = normalize(p);
   vec3 sunT = atmSunTransmittance(p + up * 0.01, uSun);
   float sunUp = dot(up, uSun);
+#ifdef DUSTY
+  // Dusty regolith: mostly Lambert with some Lommel-Seeliger, lit by the Sun through the
+  // dust and by the butterscotch sky (on Mars about a third of the light on the ground
+  // comes from the sky at this dust load).
+  float mu0 = max(ndl, 0.0);
+  float mu = max(dot(n, -viewDir), 0.0);
+  float ls = 2.0 * mu0 / (mu0 + mu + 1e-4);
+  vec3 color = albedo * sunT * mix(mu0, ls * 0.5, 0.3);
+  color += albedo * vec3(0.16, 0.11, 0.075) * smoothstep(-0.2, 0.5, sunUp) * (0.6 + 0.4 * dot(n, up));
+#else
   vec3 color = albedo * sunT * max(ndl, 0.0);
   // Skylight: a small fraction of the sunlight, blue-tinted, fading through twilight.
   color += albedo * vec3(0.05, 0.07, 0.11) * smoothstep(-0.15, 0.4, sunUp);
+#endif
   color *= eclipse;
   if (vWater > 0.5) {
     vec3 h = normalize(uSun - viewDir);
@@ -139,7 +181,7 @@ void main() {
   // normal albedo is about 0.12, so scale it back.
   // In Earth's umbra the Moon is lit only by sunlight refracted through Earth's
   // atmosphere, reddened by the same scattering that makes sunsets red (uEclTint).
-  vec3 color = albedo * 0.4 * mix(mu0, ls * 0.5, 0.7) * uSunIntensity * (eclipse + (1.0 - eclipse) * uEclTint);
+  vec3 color = albedo * mix(mu0, ls * 0.5, 0.7) * uSunIntensity * (eclipse + (1.0 - eclipse) * uEclTint);
 #endif
   gl_FragColor = vec4(color, 1.0);
   #include <tonemapping_fragment>
@@ -171,17 +213,25 @@ export class Globe {
     uEclSunRadius: { value: 695700 },
     uEclOcc: { value: new THREE.Vector4() },
     uEclTint: { value: new THREE.Vector3() },
+    uAlbedoScale: { value: 1 },
+    uDetailMap: { value: detailMap() },
+    uDetail: { value: 0 },
   };
   private blankNight = new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1);
   pending = 0;
+  readonly atmosphere?: AtmosphereParams;
+  private readonly fragment: string;
 
   constructor(
     readonly bodyId: number,
     readonly shape: Shape,
     private readonly store: TileStore,
-    private readonly atmosphere: boolean,
+    /** Earth (air, oceans, city lights), Mars (dust) or an airless body. */
+    readonly kind: SurfaceKind,
   ) {
     this.uniforms.uFlatten.value = shape.a / shape.b;
+    this.atmosphere = kind === 'earth' ? ATMOSPHERE : kind === 'mars' ? MARS_ATMOSPHERE : undefined;
+    this.fragment = fragmentShader(atmosphereGlsl(this.atmosphere ?? ATMOSPHERE));
     this.blankNight.needsUpdate = true;
     this.roots = [this.makeNode(0, 0, 0), this.makeNode(0, 1, 0)];
     this.group.name = `globe-${bodyId}`;
@@ -332,7 +382,10 @@ export class Globe {
   private ensureBuilt(node: Node): void {
     if (node.mesh || node.building || node.failed) return;
     this.pending++;
+    // A pack that fails to load is marked missing in the store, so one retry builds the
+    // tile from coarser data instead of leaving a hole.
     node.building = this.build(node)
+      .catch(() => this.build(node))
       .catch((err) => {
         node.failed = true;
         console.warn(`tile ${node.level}/${node.x}/${node.y}:`, err);
@@ -347,7 +400,7 @@ export class Globe {
     const { level, x, y } = node;
     const heightRef = this.store.locate(this.bodyId, 'height', level, x, y);
     const colorRef = this.store.locate(this.bodyId, 'color', level, x, y);
-    const nightRef = this.atmosphere ? this.store.locate(this.bodyId, 'night', level, x, y) : null;
+    const nightRef = this.kind === 'earth' ? this.store.locate(this.bodyId, 'night', level, x, y) : null;
     const [heights, color, night] = await Promise.all([
       heightRef ? this.heightTile(heightRef) : Promise.resolve(null),
       colorRef ? this.texture(colorRef) : Promise.resolve(null),
@@ -360,13 +413,14 @@ export class Globe {
     g.setAttribute('normal', new THREE.BufferAttribute(geometry.normals, 3));
     g.setAttribute('uv', new THREE.BufferAttribute(geometry.uvs, 2));
     g.setAttribute('water', new THREE.BufferAttribute(geometry.water, 1));
+    g.setAttribute('detail', new THREE.BufferAttribute(geometry.detail, 2));
     g.setIndex(new THREE.BufferAttribute(geometry.indices, 1));
     g.boundingSphere = new THREE.Sphere(new THREE.Vector3(), geometry.radius);
 
     const material = new THREE.ShaderMaterial({
       vertexShader,
-      fragmentShader,
-      defines: this.atmosphere ? { ATMOSPHERE: '' } : {},
+      fragmentShader: this.fragment,
+      defines: this.kind === 'earth' ? { ATMOSPHERE: '' } : this.kind === 'mars' ? { ATMOSPHERE: '', DUSTY: '' } : {},
       side: THREE.DoubleSide,
       uniforms: {
         ...this.uniforms,
@@ -454,4 +508,53 @@ function xform(node: { level: number; x: number; y: number }, ref: TileRef | nul
   if (!ref) return new THREE.Vector4(0, 0, 1, 1);
   const k = 2 ** (node.level - ref.level);
   return new THREE.Vector4((node.x - ref.x * k) / k, (node.y - ref.y * k) / k, 1 / k, 1 / k);
+}
+
+let sharedDetail: THREE.DataTexture | undefined;
+/**
+ * A 256 x 256 tiling noise for close-up grain: red is smooth value noise (several
+ * octaves, all periodic over the tile), green and blue its x and y slopes.
+ */
+function detailMap(): THREE.DataTexture {
+  if (sharedDetail) return sharedDetail;
+  const n = 256;
+  const h = new Float32Array(n * n);
+  let seed = 12345;
+  const rand = () => ((seed = (seed * 1103515245 + 12345) >>> 0) / 4294967296);
+  for (let octave = 0, cells = 8, amp = 1; octave < 5; octave++, cells *= 2, amp *= 0.55) {
+    const g = new Float32Array(cells * cells).map(rand);
+    const step = n / cells;
+    for (let y = 0; y < n; y++) {
+      for (let x = 0; x < n; x++) {
+        const fx = x / step, fy = y / step;
+        const x0 = Math.floor(fx), y0 = Math.floor(fy);
+        const tx = fx - x0, ty = fy - y0;
+        const sx = tx * tx * (3 - 2 * tx), sy = ty * ty * (3 - 2 * ty);
+        const at = (i: number, j: number) => g[((j % cells) * cells) + (i % cells)];
+        const v = (at(x0, y0) * (1 - sx) + at(x0 + 1, y0) * sx) * (1 - sy) + (at(x0, y0 + 1) * (1 - sx) + at(x0 + 1, y0 + 1) * sx) * sy;
+        h[y * n + x] += (v - 0.5) * amp;
+      }
+    }
+  }
+  const data = new Uint8Array(n * n * 4);
+  for (let y = 0; y < n; y++) {
+    for (let x = 0; x < n; x++) {
+      const k = y * n + x;
+      const dx = h[y * n + ((x + 1) % n)] - h[y * n + ((x + n - 1) % n)];
+      const dy = h[((y + 1) % n) * n + x] - h[((y + n - 1) % n) * n + x];
+      data[k * 4] = Math.max(0, Math.min(255, 128 + h[k] * 160));
+      data[k * 4 + 1] = Math.max(0, Math.min(255, 128 + dx * 900));
+      data[k * 4 + 2] = Math.max(0, Math.min(255, 128 + dy * 900));
+      data[k * 4 + 3] = 255;
+    }
+  }
+  const t = new THREE.DataTexture(data, n, n);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.magFilter = THREE.LinearFilter;
+  t.minFilter = THREE.LinearMipmapLinearFilter;
+  t.generateMipmaps = true;
+  t.anisotropy = 4;
+  t.needsUpdate = true;
+  sharedDetail = t;
+  return t;
 }

@@ -90,6 +90,18 @@ const views = {
   'flight-earth': `focus=Earth&t=${T}&dist=20000&fly=1&target=Moon`,
   'flight-saturn': `focus=Saturn&t=${T}&dist=500000&pitch=0.25&fly=1&target=Titan`,
   'flight-moon-low': `focus=Moon&t=${T}&lat=-8&lon=-15&dist=25&heading=60&tilt=6&fly=1&target=Earth`,
+  // Landing and walking: Mars, Tranquility Base and Jezero crater, from above and on foot.
+  'mars-globe': `focus=Mars&t=2026-10-09T16:00:00Z&lat=18.4&lon=77.5&dist=9000&heading=0&tilt=80`,
+  'jezero-crater': `focus=Mars&t=2026-10-09T16:00:00Z&lat=18.5&lon=77.4&dist=60&heading=290&tilt=30`,
+  'jezero': `site=jezero&t=2026-10-09T16:00:00Z`,
+  'jezero-walk': `site=jezero&t=2026-10-09T16:00:00Z&walk=1`,
+  'apollo11': `site=apollo11&t=2026-10-18T04:00:00Z`,
+  'apollo11-walk': `site=apollo11&t=2026-10-18T04:00:00Z&walk=1`,
+  // Sky events (the Events menu), mid-event.
+  'transit-venus-2012': `event=transit%20venus%202012&t=2012-06-06T01:29:36Z`,
+  'transit-mercury-2019': `event=transit%20mercury%202019&t=2019-11-11T15:19:48Z`,
+  'phobos-transit': `event=phobos%202%20apr%202022&t=2022-04-02T10:54:47Z`,
+  'apophis': `event=apophis&t=2029-04-13T21:45:00Z`,
 };
 const only = process.argv[3]?.split(',');
 
