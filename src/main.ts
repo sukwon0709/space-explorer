@@ -851,7 +851,7 @@ async function main() {
   };
 
   const controls = new FlightControls({
-    warp: () => toggleWarp(),
+    warp: () => (ship && !ship.warp.on && !flight.going && flight.target !== undefined ? travel() : toggleWarp()),
     assist: () => {
       if (!ship) return;
       ship.assist = !ship.assist;
@@ -861,6 +861,7 @@ async function main() {
       if (flight.target === undefined) hud.say('Pick a destination first: type a name or click a label');
       else {
         flight.aligning = true;
+        flight.going = false;
         controls.turned = false;
       }
     },
@@ -874,9 +875,11 @@ async function main() {
   const flight = {
     target: undefined as number | undefined,
     aligning: false,
+    /** Turning toward the destination, to warp there once the nose is on it. */
+    going: false,
     /** Waiting for an instant trip to finish, to take the controls again. */
     jumping: undefined as 'start' | 'flying' | undefined,
-    power: Number(params.get('power') ?? 3),
+    power: Number(params.get('power') ?? 10),
     assist: params.get('assist') !== '0',
   };
   let ship: Ship | undefined;
@@ -908,12 +911,12 @@ async function main() {
       lookUp = 0;
       skyAim = undefined;
       fov = 60;
-      hud.say(`You have the controls, near ${nameOf(ref)}. W to thrust, drag to turn, X for warp. Controls lists the rest.`, 8);
+      hud.say(`You have the controls, near ${nameOf(ref)}. Pick a destination and press X to fly there, or W to thrust and drag to turn.`, 8);
     } else if (!on && ship) {
       const eye = ship.position(flightWorld, clock.tdb);
       const focus = ship.ref;
       ship = undefined;
-      flight.aligning = false;
+      flight.aligning = flight.going = false;
       const frame = frameOf(focus);
       rig.place(focus, frame, sub(eye, frame.origin));
       fov = 50;
@@ -928,21 +931,30 @@ async function main() {
   pick = (id) => {
     if (!ship) return false;
     flight.target = id;
-    flight.aligning = false;
-    hud.say(`Destination: ${nameOf(id)}. T turns toward it, X warps there, G jumps straight there.`, 6);
+    flight.aligning = flight.going = false;
+    hud.say(`Destination: ${nameOf(id)}. X flies you there, G jumps there instantly.`, 6);
     return true;
   };
-  const toggleWarp = () => {
+  const toggleWarp = (going = false) => {
     if (!ship) return;
     const tdb = clock.tdb;
-    if (ship.warp.on) {
-      ship.dropWarp(flightWorld, tdb);
+    if (ship.warp.on || flight.going) {
+      if (ship.warp.on) ship.dropWarp(flightWorld, tdb);
+      flight.aligning = flight.going = false;
       hud.say('Warp drive off');
       return;
     }
-    const blocked = ship.engageWarp(flightWorld, tdb, warpLimiters(tdb), flight.target !== undefined);
-    if (blocked) hud.say(`Too close to ${nameOf(blocked.id)} to warp toward it: turn away or fly out first`);
-    else hud.say(flight.target !== undefined ? `Warp drive on: it slows by itself near anything ahead, and stops at ${nameOf(flight.target)} if you point at it` : 'Warp drive on: W faster, S slower, X to stop');
+    // The drive runs as fast as it safely can; W and S trim it.
+    const blocked = ship.engageWarp(flightWorld, tdb, warpLimiters(tdb), true);
+    if (blocked) hud.say(blocked.id === flight.target ? `You are already at ${nameOf(blocked.id)}` : `Too close to ${nameOf(blocked.id)} to warp toward it: turn away or fly out first`);
+    else if (going) hud.say(`On the way to ${nameOf(flight.target!)}: X stops`);
+    else hud.say('Warp drive on: it slows by itself near anything ahead. S slower, W faster, X stops');
+  };
+  /** One press to travel: turn toward the destination, then warp there. */
+  const travel = () => {
+    flight.aligning = flight.going = true;
+    controls.turned = false;
+    hud.say(`Turning toward ${nameOf(flight.target!)}`);
   };
   /** Instant travel from the ship: the usual flight there, then the controls back. */
   const jump = (id: number) => {
@@ -965,11 +977,17 @@ async function main() {
       flight.power = s.power;
     }
     flight.assist = s.assist;
-    if (controls.turned) flight.aligning = false;
+    if (controls.turned) flight.aligning = flight.going = false;
     if (flight.aligning && flight.target !== undefined) {
       const dir = sub(flightWorld.position(flight.target, tdb), s.position(flightWorld, tdb));
       const d = length(dir);
-      if (s.align([dir[0] / d, dir[1] / d, dir[2] / d], 1.2, dt) < 1e-4 && !s.warp.on) flight.aligning = false;
+      const left = s.align([dir[0] / d, dir[1] / d, dir[2] / d], 2.5, dt);
+      if (flight.going && left < 0.01) {
+        // Nose on the target: away we go (and keep tracking it on the way).
+        flight.going = false;
+        toggleWarp(true);
+        if (!s.warp.on) flight.aligning = false;
+      } else if (left < 1e-4 && !s.warp.on && !flight.going) flight.aligning = false;
     }
     const input = controls.input(s.warp.on);
     const limiters = s.warp.on ? warpLimiters(tdb) : [];
