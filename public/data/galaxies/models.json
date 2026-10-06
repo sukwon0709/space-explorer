@@ -1,0 +1,160 @@
+{
+ "source": "SDSS DR9 g, r, i and DSS2 colour via CDS hips2fits; foreground stars removed with Gaia DR3",
+ "models": [
+  {
+   "name": "Whirlpool Galaxy",
+   "survey": "SDSS",
+   "kind": "disc",
+   "ra": 202.469689,
+   "dec": 47.19518,
+   "pa": 163.12,
+   "q": 0.6196,
+   "R": 23.2613,
+   "bulge": {
+    "L": 0.158492,
+    "re": 0.91415,
+    "n": 4,
+    "q0": 1.0,
+    "colour": [
+     1.1861,
+     0.9722,
+     0.7271
+    ],
+    "p": 0.85099,
+    "b": 7.66925,
+    "rho0": 9.70194
+   },
+   "z0": 0.6058,
+   "zd": 0.3029,
+   "tau0": 0.7,
+   "hd": 4.2403,
+   "dh": 1.3712,
+   "h": 3.0288,
+   "near": -1,
+   "edgeOn": false,
+   "cosi": 0.5985,
+   "H": 5.4849,
+   "file": "whirlpool-galaxy.jpg",
+   "light": 0.01981788868304726,
+   "size": [
+    2048,
+    1224
+   ],
+   "discL": 0.9375112175825703,
+   "dust": "whirlpool-galaxy-dust.jpg",
+   "tauMax": 0.7079478421999643
+  },
+  {
+   "name": "NGC 5195",
+   "kind": "spheroid",
+   "ra": 202.498062,
+   "dec": 47.265983,
+   "pa": 78.75,
+   "q": 0.9216,
+   "R": 12.6916,
+   "H": 11.6961,
+   "bulge": {
+    "L": 1.0,
+    "re": 2.11526,
+    "n": 5,
+    "q0": 0.9215686274509803,
+    "colour": [
+     1.3215,
+     0.9498,
+     0.5504
+    ],
+    "p": 0.88025,
+    "b": 9.66871,
+    "rho0": 35.6091
+   },
+   "with": "Whirlpool Galaxy",
+   "survey": "SDSS"
+  },
+  {
+   "name": "Andromeda Galaxy",
+   "survey": "DSS2",
+   "kind": "disc",
+   "ra": 10.686024,
+   "dec": 41.271447,
+   "pa": 35.16,
+   "q": 0.3294,
+   "R": 25.117,
+   "bulge": {
+    "L": 1.06119,
+    "re": 1.0,
+    "n": 2.2,
+    "q0": 0.6000845802828517,
+    "colour": [
+     1.5732,
+     0.9064,
+     0.2396
+    ],
+    "p": 0.73415,
+    "b": 4.07153,
+    "rho0": 2.98664
+   },
+   "z0": 0.8081,
+   "zd": 0.4041,
+   "tau0": 0.7,
+   "hd": 5.6569,
+   "dh": 1.5,
+   "h": 4.0407,
+   "near": 1,
+   "edgeOn": false,
+   "cosi": 0.2671,
+   "H": 4.0407,
+   "file": "andromeda-galaxy.jpg",
+   "light": 0.016104877557515614,
+   "size": [
+    4096,
+    1096
+   ],
+   "discL": 0.3872866108735201,
+   "dust": "andromeda-galaxy-dust.jpg",
+   "tauMax": 0.40976747919694945
+  },
+  {
+   "name": "Triangulum Galaxy",
+   "survey": "DSS2",
+   "kind": "disc",
+   "ra": 23.464053,
+   "dec": 30.658227,
+   "pa": 21.8,
+   "q": 0.6118,
+   "R": 10.3905,
+   "bulge": {
+    "L": 0.0,
+    "re": 0.00676,
+    "n": 1.0,
+    "q0": 0.6,
+    "colour": [
+     1.3161,
+     0.9484,
+     0.5806
+    ],
+    "p": 0.44493,
+    "b": 1.67835,
+    "rho0": 0.0
+   },
+   "z0": 0.2706,
+   "zd": 0.1353,
+   "tau0": 0.7,
+   "hd": 1.8941,
+   "dh": 0.0,
+   "h": 1.3529,
+   "near": -1,
+   "edgeOn": false,
+   "cosi": 0.5901,
+   "H": 1.3529,
+   "file": "triangulum-galaxy.jpg",
+   "light": 1.4360926624882548,
+   "size": [
+    3072,
+    1816
+   ],
+   "discL": 1.3108429938237791,
+   "dust": "triangulum-galaxy-dust.jpg",
+   "tauMax": 1.5666912835269993
+  }
+ ]
+}
