@@ -103,6 +103,15 @@ SDSS_BANDS = ("i", "r", "g")
 REDDENING = {"SDSS": 0.58 * 1.086 * 0.921, "DSS2": 0.45 * 1.086 * 0.921}
 # The colour excess of light mixed with dust is diluted (half the light is in front).
 MIXING = 2.0
+# Galaxies whose plates get Pan-STARRS DR1's finer detail and unsaturated core.
+PS1_DETAIL = {"Andromeda Galaxy"}
+# Scale (pixels, Gaussian sigma) above which the plates' light is kept.
+PS1_SCALE = 12.0
+# The plates' pixel noise for those galaxies (PS1's resolved stars are not noise).
+PLATE_NOISE: dict[str, float] = {}
+# Their plates as they were (the bulge and disc are fitted to these: PS1's sky subtraction
+# leaves its core's light out of step with the disc around it).
+PLATE_ONLY: dict[str, tuple[np.ndarray, np.ndarray]] = {}
 FIXTURE = ["Whirlpool Galaxy", "Andromeda Galaxy", "Sombrero Galaxy", "Needle Galaxy", "Triangulum Galaxy", "M87 (Virgo A)"]
 
 
@@ -164,8 +173,79 @@ def survey_image(job: dict, cache: str) -> tuple[np.ndarray, str, np.ndarray]:
         # density range (set by the brightest stars) is not to be trusted.
         saturated |= D > sky + 0.75 * (D.max() - sky)
         print(f"  DSS2 {band}: S = {S:.0f} per decade", flush=True)
+    if job["name"] in PS1_DETAIL:
+        PLATE_ONLY[job["name"]] = (out.copy(), saturated.copy())
+        out, saturated = ps1_detail(out, saturated, base, s, w, cache, job["name"])
     out[..., 1] = 0.5 * (out[..., 0] + out[..., 2])
     return out, "DSS2", saturated
+
+
+def ps1_detail(out: np.ndarray, saturated: np.ndarray, base: dict, s: str, w: int, cache: str,
+               job_name: str) -> tuple[np.ndarray, np.ndarray]:
+    """Pan-STARRS DR1's sharper, unsaturated detail on the plates' large-scale light.
+
+    The PS1 stacks are sharper (seeing about 1.2" against the plates' 3") and do not
+    saturate in a bright core, but their sky subtraction took out a large galaxy's broad
+    glow. So the plates keep the scales above PSF1_SCALE and PS1 gives everything finer,
+    scaled to the plates' units where both see the same structure; where the plates
+    saturate, PS1 gives the whole core, raised to meet the plates around it."""
+    from astropy.io import fits
+
+    yy, xx = np.mgrid[0:w, 0:w]
+    rr = np.hypot(xx - w / 2, yy - w / 2)
+    # PS1's g stacks are corrupt in a bright core, so its r gives the detail for both of
+    # the plates' bands, by ratio (the colours stay the plates').
+    url = f"{HIPS2FITS}?{urllib.parse.urlencode({**base, 'hips': 'CDS/P/PanSTARRS/DR1/r', 'format': 'fits'})}"
+    P = np.flipud(fits.getdata(io.BytesIO(fetch(url, os.path.join(cache, f"{s}-{w}-ps1-r.fits")))).astype(float))
+    # Where PS1 has no data (gaps between its cells), the plates alone.
+    missing = ndimage.binary_dilation(~np.isfinite(P) | (P == 0), iterations=int(2 * PS1_SCALE))
+    P = np.nan_to_num(P)
+    D = out[..., 0]
+    lum0 = luminance(np.stack([D, 0.5 * (D + out[..., 2]), out[..., 2]], axis=-1))
+    PLATE_NOISE[job_name] = float(1.4826 * np.median(np.abs((lum0 - ndimage.median_filter(lum0, 5))[w // 8:-w // 8, w // 8:-w // 8])))
+    smooth = ndimage.gaussian_filter(D, PS1_SCALE)
+    # PS1 in the plates' units, matched on isophotes just fainter than the saturated core
+    # (the bulge, where PS1's sky subtraction took off only a near-constant; medians, so
+    # stars don't count): D = k P + c.
+    labels, _ = ndimage.label(ndimage.binary_closing(saturated, iterations=3))
+    core0 = labels == labels[w // 2, w // 2] if labels[w // 2, w // 2] else rr < 0.02 * w
+    top = float(np.percentile(smooth[core0], 5))
+    levels = np.geomspace(0.2 * top, 0.8 * top, 12)
+    clear = ~ndimage.binary_dilation(saturated, iterations=3) & (rr < 0.3 * w)
+    pts = []
+    for lo, hi in zip(levels[:-1], levels[1:]):
+        band_ = (smooth > lo) & (smooth <= hi) & clear
+        if band_.sum() > 50:
+            pts.append((np.median(D[band_]), np.median(P[band_])))
+    pts = np.array(pts)
+    (k, offset), *_ = np.linalg.lstsq(np.stack([pts[:, 1], np.ones(len(pts))], axis=1), pts[:, 0], rcond=None)
+    sharp = k * P + offset
+    # Finer than PS1_SCALE, PS1's structure; coarser, the plates'.
+    detail = smooth + k * (P - ndimage.gaussian_filter(P, PS1_SCALE))
+    # The saturated core: PS1 itself.
+    core = ndimage.binary_dilation(core0, iterations=6)
+    blend = np.clip(ndimage.gaussian_filter(core.astype(float), 6) * 1.5, 0, 1)
+    red = (1 - blend) * detail + blend * sharp
+    gain = red / np.maximum(smooth, 1e-6 * smooth.max())
+    # Only on the galaxy: on the empty sky the ratio would make PS1's noise the picture.
+    edge = smooth[rr > 0.45 * w]
+    bg = float(np.median(edge))
+    sd = 1.4826 * float(np.median(np.abs(edge - bg))) + 1e-12
+    on = np.maximum(np.clip((smooth - bg - 3 * sd) / (30 * sd), 0, 1), blend)
+    # PS1's own artefacts (rings around its saturated stars) would cut holes in the light.
+    gain = np.where(missing & ~core, 1.0, 1 + on * (np.maximum(gain, 0.2) - 1))
+    for c in (0, 2):
+        # Each band gets the same fine structure, as a ratio of its own smooth light; in
+        # the core, the colour just outside it.
+        sm_c = ndimage.gaussian_filter(out[..., c], PS1_SCALE)
+        ring = ndimage.binary_dilation(core, iterations=10) & ~ndimage.binary_dilation(core, iterations=4)
+        ratio = float(np.median(sm_c[ring] / np.maximum(smooth[ring], 1e-12))) if ring.any() else 1.0
+        sm_c = (1 - blend) * sm_c + blend * smooth * ratio
+        out[..., c] = sm_c * gain
+    print(f"  PS1 r: x{k:.4g} + {offset:.3g} to the plate, core {int(core.sum())} px", flush=True)
+    # PS1 does not saturate on a galaxy's core; only on bright stars (which are removed).
+    saturated = saturated & ~core
+    return out, saturated
 
 
 def gaia_cone(ra: float, dec: float, radius: float, glim: float, cache: str, depth: int = 0) -> np.ndarray:
@@ -399,17 +479,28 @@ def process(job: dict, geo: dict, cache: str, out_dir: str, bright: np.ndarray, 
         sep = np.hypot(*tangent(job["ra"], job["dec"], stars[:, 0], stars[:, 1])) * 3600
         stars = stars[sep > core]
     img = clean_linear(lin, fov, job["ra"], job["dec"], stars, others, star_scale=1.0 if survey == "DSS2" else 0.8)
+    plate = None
+    if name in PLATE_ONLY:
+        plate_lin, plate_sat = PLATE_ONLY.pop(name)
+        plate = clean_linear(plate_lin, fov, job["ra"], job["dec"], stars, others, star_scale=1.0)
     lum = luminance(img)
     n = w
     hp = (lum - ndimage.median_filter(lum, 5))[n // 8:-n // 8, n // 8:-n // 8]
-    noise = 1.4826 * np.median(np.abs(hp)) + 1e-12
+    # (With PS1's detail added, its resolved stars are not noise: the plates' own.)
+    noise = PLATE_NOISE.get(name, 1.4826 * np.median(np.abs(hp))) + 1e-12
     extra = []
     for cname, cgeo in companions:
         img, centry = fit_companion(img, cname, cgeo, job, pix, noise, saturated)
         centry["with"] = name
         centry["survey"] = survey
         extra.append(centry)
+        if plate is not None:
+            plate, _ = fit_companion(plate, cname, cgeo, job, pix, noise, plate_sat)
     lum = luminance(img)
+    lum_fit, sat_fit, noise_fit = lum, saturated, noise
+    if plate is not None:
+        lum_fit, sat_fit = luminance(plate), plate_sat
+        noise_fit = 1.4826 * np.median(np.abs((lum_fit - ndimage.median_filter(lum_fit, 5))[n // 8:-n // 8, n // 8:-n // 8])) + 1e-12
 
     # Geometry: centre (the light's peak near the catalogue position), axes on the image.
     pa, q, spheroid = geo["pa"], GEOMETRY.get(name, {}).get("q", geo["q"]), geo["spheroid"]
@@ -453,15 +544,34 @@ def process(job: dict, geo: dict, cache: str, out_dir: str, bright: np.ndarray, 
         # Edge-on, the catalogue's axis ratio is the bulge's and the disc's outline together;
         # the disc itself is far thinner.
         q_disc = 0.06 if cosi < EDGE_ON else q
-        I_d, h_px, I_b, re_px, sn, qb = fit_2d(lum, (cx, cy), major, minor, q_disc, qb, r25_px, geo["h"] / kpc_per_px, noise,
-                                           ndimage.binary_dilation(saturated, iterations=2), name in BULGELESS, prior)
+        I_d, h_px, I_b, re_px, sn, qb = fit_2d(lum_fit, (cx, cy), major, minor, q_disc, qb, r25_px, geo["h"] / kpc_per_px, noise_fit,
+                                           ndimage.binary_dilation(sat_fit, iterations=2), name in BULGELESS, prior)
         # The intrinsic axis ratio that looks this flat at this inclination.
         q0 = math.sqrt(max(qb ** 2 - cosi ** 2, 0.0) / max(1 - cosi ** 2, 1e-6)) if cosi < 0.999 else BULGE_Q0
         q0 = min(max(q0, 0.3), 1.0)
     bn = sersic_b(sn)
     m = np.hypot(a_, b_ / qb) / re_px
+    if plate is not None and prior:
+        # PS1's core is not saturated: the bulge's size, profile and amplitude are what it
+        # shows above the plate's disc (a lower bound on the plates, so the prior there).
+        disc_px = I_d * np.exp(-np.hypot(a_, b_ / max(q, 0.06)) / h_px)
+        rb = np.hypot(a_, b_ / qb)
+        inside = (rb < 4 * re_px) & ~ndimage.binary_dilation(saturated, iterations=2)
+        y_b = (lum - disc_px)[inside]
+        wt = 1 / (0.05 * np.abs(lum[inside]) + noise)
+        best = (np.inf, None)
+        for sv in (0.6, 0.8, 1.0, 1.25, 1.5, 1.75, 2.0, 2.2, 2.5, 3.0, 4.0):
+            for rv in np.geomspace(0.5 * re_px, 3 * re_px, 15):
+                prof_b = np.exp(-sersic_b(sv) * (rb[inside] / rv) ** (1 / sv)) * wt
+                Iv = max(float(np.dot(prof_b, y_b * wt) / np.dot(prof_b, prof_b)), 0.0)
+                chi = float(np.sum((y_b * wt - Iv * prof_b) ** 2))
+                if chi < best[0]:
+                    best = (chi, (Iv, rv, sv))
+        I_b, re_px, sn = best[1]
+        bn = sersic_b(sn)
+        m = rb / re_px
     # The bulge as the survey saw it: blurred by the seeing (FWHM about 1.4" for SDSS, 3" for the plates).
-    psf = (1.4 if survey == "SDSS" else 3.0) / 2.355 / pix
+    psf = (1.4 if survey == "SDSS" else 1.2 if name in PS1_DETAIL else 3.0) / 2.355 / pix
     bulge_map = ndimage.gaussian_filter(I_b * np.exp(-bn * m ** (1 / sn)), psf) if psf > 0.3 else I_b * np.exp(-bn * m ** (1 / sn))
     # Its colour: the image's at the centre (dust-free in front of the bulge, mostly).
     rc = max(2.0, 0.3 * re_px)
@@ -511,7 +621,7 @@ def process(job: dict, geo: dict, cache: str, out_dir: str, bright: np.ndarray, 
     h_kpc = min(max(h_kpc, 0.5 * geo["h"]), 2.0 * geo["h"])
     z0 = THICK.get(name, DISC_Z0) * h_kpc
     R = n / 2 * kpc_per_px
-    entry = {"name": name, "survey": survey, "kind": "spheroid" if spheroid else "disc", "ra": round(ra_c, 6),
+    entry = {"name": name, "survey": "DSS2+PS1" if name in PS1_DETAIL else survey, "kind": "spheroid" if spheroid else "disc", "ra": round(ra_c, 6),
              "dec": round(dec_c, 6), "pa": round(math.degrees(pa), 2), "q": round(q, 4), "R": round(R, 4),
              "total": total, "bulge": {"L": Lb / total, "re": float(re_px * kpc_per_px), "n": sn, "q0": q0,
                                        "colour": [round(float(v), 4) for v in colour]}}
@@ -987,7 +1097,7 @@ def main() -> None:
                 fixtures[name]["tau"] = downsample(fixture["tau"], 64)
                 fixtures[name]["young"] = downsample(fixture["young"] * fixture["face"], 64)
         with open(path, "w") as f:
-            json.dump({"source": "SDSS DR9 g, r, i and DSS2 colour via CDS hips2fits; foreground stars removed with Gaia DR3",
+            json.dump({"source": "SDSS DR9 g, r, i, DSS2 colour and Pan-STARRS DR1 g, r via CDS hips2fits; foreground stars removed with Gaia DR3",
                        "models": list(entries.values())}, f, indent=1)
         with open(fx_path, "w") as f:
             json.dump(fixtures, f, separators=(",", ":"))
