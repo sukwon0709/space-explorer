@@ -78,8 +78,9 @@ COMPANIONS = {"Whirlpool Galaxy": ["NGC 5195"]}
 # M104 and NGC 4565: Kormendy and Ho 2013, Kormendy and Barentine 2010.
 PRIORS = {"Andromeda Galaxy": (1.0, 2.2), "Sombrero Galaxy": (2.3, 4.0), "Needle Galaxy": (1.0, 1.5)}
 # Where the catalogue's axis ratio is the bulge's outline, not the disc's: the disc's own
-# (M104 is 84 degrees from face-on, its dust lane shows).
-GEOMETRY = {"Sombrero Galaxy": {"q": 0.224}}
+# (M104 is 84 degrees from face-on, its dust lane shows). "ring": its dust lies in a ring
+# (Bendo et al. 2006), whose radius and depth are fitted to the image.
+GEOMETRY = {"Sombrero Galaxy": {"q": 0.224, "ring": True}}
 # Late-type and irregular galaxies (Sc and later, de Vaucouleurs RC3): no bulge to speak
 # of, only a nucleus.
 BULGELESS = {"Triangulum Galaxy", "Southern Pinwheel Galaxy", "Large Magellanic Cloud", "Small Magellanic Cloud", "NGC 300", "NGC 55", "NGC 2403",
@@ -624,9 +625,9 @@ def process(job: dict, geo: dict, cache: str, out_dir: str, bright: np.ndarray, 
     disc_seen = luminance(disc_img).sum()
     face0 = face
 
-    def corrected(tau0: float, kb: float = 1.0):
+    def corrected(tau0: float, kb: float = 1.0, lane=None):
         # kb: the bulge's share of the image's light scaled by this, the disc's the rest.
-        dust_map = tau_lane + tau_smooth * (tau0 / DUST_TAU0)
+        dust_map = (tau_lane if lane is None else lane) + tau_smooth * (tau0 / DUST_TAU0)
         out = face0
         disc_model = luminance(face0).sum() * (2 * R / face0.shape[1]) * (2 * R / face0.shape[0])
         if disc_model > 0:
@@ -643,17 +644,26 @@ def process(job: dict, geo: dict, cache: str, out_dir: str, bright: np.ndarray, 
         # Neither the lanes nor the bulge can be told apart from the disc face-on: the smooth
         # dust's depth and the bulge's share are those whose picture from Earth looks most
         # like the image.
-        best = (-np.inf, tau0, kb)
-        for k_ in ((1.0, 1.5, 2.0, 3.0, 4.0, 6.0) if Lb > 0 else (1.0,)):
-            if (k_ - 1) * Lb >= 0.8 * disc_seen:
-                continue
-            for t0 in (0.0, 0.05, 0.1, 0.2, 0.35, 0.7):
-                f_, lb, dm = corrected(t0, k_)
-                c = edge_on_match(sky_true, (cx, cy), major, minor, kpc_per_px, R, H, sky_axes(cosi, near), f_, dm,
-                                  z0, thin_z, thin_frac, zd, lb, re_px * kpc_per_px, sn, q0)
-                if c > best[0]:
-                    best = (c, t0, k_)
-        _, tau0, kb = best
+        best = (-np.inf, tau0, kb, None)
+        # A dust ring: its radius (fraction of the disc's scale length) and face-on depth.
+        rings = [None]
+        if GEOMETRY.get(name, {}).get("ring"):
+            rings = [(r0, tr) for r0 in (0.6, 0.75, 0.9, 1.05, 1.2) for tr in (0.5, 1.0, 2.0, 4.0)]
+        for ring in rings:
+            lane = tau_lane if ring is None else ring[1] * np.exp(-(((rr - ring[0] * h_kpc) / (0.12 * ring[0] * h_kpc)) ** 2))
+            for k_ in ((1.0, 1.5, 2.0, 3.0, 4.0, 6.0) if Lb > 0 else (1.0,)):
+                if (k_ - 1) * Lb >= 0.8 * disc_seen:
+                    continue
+                for t0 in ((0.0, 0.05, 0.1, 0.2, 0.35, 0.7) if ring is None else (0.0, 0.05)):
+                    f_, lb, dm = corrected(t0, k_, lane)
+                    c = edge_on_match(sky_true, (cx, cy), major, minor, kpc_per_px, R, H, sky_axes(cosi, near), f_, dm,
+                                      z0, thin_z, thin_frac, zd, lb, re_px * kpc_per_px, sn, q0, n=48 if ring is None else 96)
+                    if c > best[0]:
+                        best = (c, t0, k_, ring)
+        _, tau0, kb, ring = best
+        if ring is not None:
+            tau_lane = ring[1] * np.exp(-(((rr - ring[0] * h_kpc) / (0.12 * ring[0] * h_kpc)) ** 2)) * win
+            print(f"  edge-on: dust ring at {ring[0] * h_kpc:.2f} kpc, tau {ring[1]}", flush=True)
         print(f"  edge-on: smooth dust tau0 = {tau0}, bulge x{kb} (match {best[0]:.3f})", flush=True)
     face, Lb_int, _ = corrected(tau0, kb)
     if Lb > 0:
@@ -667,10 +677,9 @@ def process(job: dict, geo: dict, cache: str, out_dir: str, bright: np.ndarray, 
     return (*finish(entry, fixture, kpc_per_px, n, face, tau_lane, out_dir, s, thin_frac), extra)
 
 
-def edge_on_match(sky, c, major, minor, kpc_per_px, R, H, axes, face, dust, z0, zy, frac, zd, Lb, re, sn, q0) -> float:
-    """How much a model, ray-traced toward Earth on a coarse grid, looks like the image:
+def edge_on_match(sky, c, major, minor, kpc_per_px, R, H, axes, face, dust, z0, zy, frac, zd, Lb, re, sn, q0, n=48) -> float:
+    """How much a model, ray-traced toward Earth on an n x n grid, looks like the image:
     correlation of square-root brightness (as the gate test measures it)."""
-    n = 48
     half = 0.9 * R
     g = (np.arange(n) + 0.5) / n * 2 * half - half
     A, B = np.meshgrid(g, g)
@@ -703,7 +712,10 @@ def edge_on_match(sky, c, major, minor, kpc_per_px, R, H, axes, face, dust, z0, 
         j = f * ((1 - (frac or 0)) * sech2(q[:, 2] / z0) / (2 * z0) + ((frac or 0) * sech2(q[:, 2] / zy) / (2 * zy) if zy else 0))
         if rho0 > 0:
             m = np.maximum(np.sqrt(q[:, 0] ** 2 + q[:, 1] ** 2 + (q[:, 2] / q0) ** 2) / re, 1e-3)
-            j = j + rho0 * m ** -p * np.exp(-bn * m ** (1 / sn)) * inside
+            # Faded out inside the box as the renderer does (core/galaxymodel.ts bulgeTaper).
+            e = np.sqrt((q[:, 0] / R) ** 2 + (q[:, 1] / R) ** 2 + (q[:, 2] / H) ** 2)
+            tt = np.clip((e - 0.7) / 0.3, 0, 1)
+            j = j + rho0 * m ** -p * np.exp(-bn * m ** (1 / sn)) * inside * (1 - tt * tt * (3 - 2 * tt))
         a = tau * sech2(q[:, 2] / zd) / (2 * zd) * dt
         light += trans * j * dt * np.where(a > 1e-4, (1 - np.exp(-a)) / np.maximum(a, 1e-12), 1.0)
         trans *= np.exp(-a)
