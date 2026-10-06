@@ -10,6 +10,8 @@ export interface TileGeometry {
   normals: Float32Array;
   uvs: Float32Array;
   water: Float32Array;
+  /** Ground coordinates for close-up detail, metres, modulo DETAIL_PERIOD (see below). */
+  detail: Float32Array;
   indices: Uint32Array;
   /** Radius of a sphere around `center` containing every vertex, km. */
   radius: number;
@@ -22,6 +24,12 @@ export interface TileGeometry {
 }
 
 const DEG = Math.PI / 180;
+/**
+ * Close-up detail is a noise that repeats every DETAIL_PERIOD metres. Each tile stores
+ * east and north metres (R lon cos lat, R lat) less a whole number of periods, chosen
+ * near its centre: small numbers on the GPU, and continuous from tile to tile.
+ */
+export const DETAIL_PERIOD = 100;
 
 /**
  * Builds one terrain tile. Heights come from `source`, the tile itself or an ancestor
@@ -89,6 +97,18 @@ export function buildTileGeometry(
   const normals = new Float32Array(total * 3);
   const uvs = new Float32Array(total * 2);
   const water = new Float32Array(total);
+  const detail = new Float32Array(total * 2);
+  const R = shape.a * 1000;
+  const ox = Math.floor((R * cLon * DEG * Math.cos(cLat * DEG)) / DETAIL_PERIOD) * DETAIL_PERIOD;
+  const oy = Math.floor((R * cLat * DEG) / DETAIL_PERIOD) * DETAIL_PERIOD;
+  for (let j = 0; j < n; j++) {
+    for (let i = 0; i < n; i++) {
+      const [lon, lat] = lonLat(i, j);
+      const k = j * n + i;
+      detail[k * 2] = R * lon * DEG * Math.cos(lat * DEG) - ox;
+      detail[k * 2 + 1] = R * lat * DEG - oy;
+    }
+  }
   let radius = 0;
   for (let k = 0; k < count; k++) {
     const dx = points[k * 3] - center[0], dy = points[k * 3 + 1] - center[1], dz = points[k * 3 + 2] - center[2];
@@ -120,7 +140,9 @@ export function buildTileGeometry(
   }
 
   // Skirts: a copy of each edge dropped below the surface hides cracks between levels.
-  const depth = Math.max(0.002, ((east - west) * DEG * shape.a) / (n - 1)) * 1.5;
+  // Deep enough for the small mismatches where a landing site's data meets the global data.
+  const width = (east - west) * DEG * shape.a;
+  const depth = Math.max(0.003, (width / (n - 1)) * 1.5, width * 0.04);
   const edges: number[] = [];
   for (let i = 0; i < n; i++) edges.push(i); // north edge
   for (let i = 0; i < n; i++) edges.push((n - 1) * n + i); // south
@@ -136,6 +158,8 @@ export function buildTileGeometry(
     uvs[k * 2] = uvs[src * 2];
     uvs[k * 2 + 1] = uvs[src * 2 + 1];
     water[k] = water[src];
+    detail[k * 2] = detail[src * 2];
+    detail[k * 2 + 1] = detail[src * 2 + 1];
   });
 
   const indices: number[] = [];
@@ -159,5 +183,5 @@ export function buildTileGeometry(
   strip(n - 1, count + 3 * n, n, true); // east
 
   const samples: Vec3[] = [0, n - 1, (n - 1) * n, count - 1, Math.floor(count / 2)].map((k) => [points[k * 3], points[k * 3 + 1], points[k * 3 + 2]]);
-  return { center, positions, normals, uvs, water, indices: new Uint32Array(indices), radius, samples, minHeight, maxHeight, heights };
+  return { center, positions, normals, uvs, water, detail, indices: new Uint32Array(indices), radius, samples, minHeight, maxHeight, heights };
 }

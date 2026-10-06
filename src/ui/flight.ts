@@ -10,6 +10,7 @@ export interface FlightActions {
   assist(): void;
   align(): void;
   jump(): void;
+  stepOut(): void;
   exit(): void;
 }
 
@@ -45,7 +46,7 @@ export class FlightControls {
         return;
       }
       if (e.repeat) return;
-      const action = { KeyX: actions.warp, KeyZ: actions.assist, KeyT: actions.align, KeyG: actions.jump, Escape: actions.exit }[e.code];
+      const action = { KeyX: actions.warp, KeyZ: actions.assist, KeyT: actions.align, KeyG: actions.jump, KeyO: actions.stepOut, Escape: actions.exit }[e.code];
       if (action) {
         action();
         e.preventDefault();
@@ -78,7 +79,7 @@ export class FlightControls {
     left.append(hold('Thrust', 'KeyW', 'Forward thrust (W)'), hold('Reverse', 'KeyS', 'Reverse thrust (S)'), hold('⟲', 'KeyQ', 'Roll left (Q)'), hold('⟳', 'KeyE', 'Roll right (E)'));
     const right = document.createElement('div');
     right.className = 'pad-group';
-    right.append(tap('Warp', actions.warp, 'Warp drive on or off (X)'), tap('Assist', actions.assist, 'Flight assist on or off (Z)'), tap('Aim', actions.align, 'Turn toward the target (T)'), tap('Jump', actions.jump, 'Jump to the target (G)'));
+    right.append(tap('Warp', actions.warp, 'Warp drive on or off (X)'), tap('Assist', actions.assist, 'Flight assist on or off (Z)'), tap('Aim', actions.align, 'Turn toward the target (T)'), tap('Jump', actions.jump, 'Jump to the target (G)'), tap('Out', actions.stepOut, 'Step outside, once landed (O)'));
     this.pad.append(left, right);
     document.body.append(this.pad);
   }
@@ -136,6 +137,7 @@ export class FlightHud {
   private readonly help: HTMLElement;
   private readonly marks = new Map<string, HTMLElement>();
   private messageUntil = 0;
+  readonly shipHelp: string;
 
   constructor() {
     this.el = document.createElement('section');
@@ -153,13 +155,15 @@ export class FlightHud {
     this.help = document.createElement('div');
     this.help.className = 'flight-help';
     this.help.hidden = true;
-    this.help.innerHTML = [
+    this.shipHelp = [
       '<b>W / S</b> thrust forward and back · <b>A / D</b> sideways · <b>R / F</b> up and down',
       '<b>Drag</b> or <b>arrows</b> to turn · <b>Q / E</b> roll · <b>Shift</b> ×10 thrust · <b>Wheel</b> engine power',
       '<b>Z</b> flight assist (holds still when you let go) · <b>X</b> warp drive, then <b>W / S</b> faster and slower',
       'Pick a destination by name or click a label, then <b>T</b> to turn toward it, <b>X</b> to warp there or <b>G</b> to jump straight there',
+      'Once landed on the Moon, Mars or Earth, <b>O</b> steps outside',
       '<b>Esc</b> leaves the ship',
     ].join('<br>');
+    this.help.innerHTML = this.shipHelp;
     helpButton.addEventListener('click', () => { this.help.hidden = !this.help.hidden; });
     this.el.append(this.lines, helpButton, this.help);
     document.body.append(this.el, this.message);
@@ -176,6 +180,11 @@ export class FlightHud {
     this.el.hidden = !on;
     if (!on) for (const m of this.marks.values()) m.hidden = true;
     if (!on) this.message.textContent = '';
+  }
+
+  /** Replace the controls list (on foot it differs from the ship's). */
+  setHelp(html: string): void {
+    this.help.innerHTML = html;
   }
 
   set(lines: string[]): void {

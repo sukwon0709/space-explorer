@@ -4,7 +4,57 @@ A real-time 3D simulator for travelling from Earth through the Solar System and 
 
 The full plan, including the roadmap, lives in the [design doc](https://claude.ai/code/artifact/c235450b-21cd-41a8-bc4b-b69ca4239c84).
 
-## Flight mode (this code)
+## Landing, walking and sky events (this code)
+
+**Landing and walking.** Set the ship down on the Moon, Mars or Earth and press O (or `Out`) to step outside, or press `Walk here` near the ground anywhere with terrain (`?walk=1` starts on foot). You walk in first person at the true surface gravity.
+
+- **Physics** (`src/core/walker.ts`). Walking happens in the body's rotating frame: its gravity, plus the centrifugal and Coriolis effects of the spin. Your walking pace follows from gravity. Walking is an inverted pendulum, and people walk at Froude number v²/(gL) = 0.25 and run at about 2.5, on Earth and in the Apollo footage alike. That gives a walk of 1.5 m/s on Earth, 0.9 m/s on Mars and 0.6 m/s on the Moon. Your feet only push through friction (μ = 0.6), so on the Moon starting, stopping and turning are slow. A jump leaves the ground at 3.1 m/s, the take-off speed of a 0.5 m jump on Earth. That is 3 m high and almost 4 s in the air on the Moon, and 1.3 m on Mars. Slopes steeper than 35° can't be climbed.
+- **Controls.** W/S/A/D walk, Shift runs, Space jumps, drag or the arrow keys look around, B boards the ship when it is within 20 m, and Esc stops walking. Phones get on-screen buttons.
+- **Landing sites**, by name in the search box (`?site=`):
+  - **Tranquility Base.** The LRO NAC 2 m elevation model and 0.5 m image, sharpened onto the global colour. Eagle's descent stage stands where LRO photographed it.
+  - **Jezero crater.** The Mars 2020 landing maps: CTX elevation and imagery over the whole crater (tiled at 80 m and 20 m), and HiRISE 1 m elevation and 25 cm image around Perseverance's landing site.
+  - **The Grand Canyon.**
+  - Within a few tens of metres the ground gets a fine procedural grain. It adds texture only, not information about the real surface.
+- **Mars.** MOLA elevation and Viking colour cover the whole planet. Its sky is dust: an optical depth of 0.5 of 1.5 µm grains that absorb blue light (Wolff et al. 2009). The daytime sky is butterscotch and the sky around a setting Sun is blue. Phobos's shadow falls on the ground.
+- **The sky from the surface** is the same sky as everywhere else: real stars, planets and the Sun, as seen from where you stand. In daylight on Mars or Earth the stars fade out. Star names never show through the ground.
+- **Gate:** `tests/walk.test.ts`.
+  - Gravity at the feet matches NASA's fact sheets (Moon 1.62, Mars 3.71 m/s²).
+  - Jumps rise v²/2g and stay up 2v/g to within 1%.
+  - Walking and running paces are the Froude-number values.
+  - Stopping from a run takes 2.4 times longer on the Moon than on Earth (μg braking).
+  - You stand still on a 20° slope and slide down a 45° one.
+
+**Sky events.** The Events menu now lists every solar and lunar eclipse, transit of Mercury and Venus, and close approach in the catalogue between 1962 and 2060. The next few come first. Picking one sets the time just before it and flies to a view of it (`?event=` with words from its name):
+- Central solar eclipses are shown from the ground where the eclipse is greatest, following the Sun. Partial ones are shown from space, over the shadow.
+- Lunar eclipses are shown from the Earth side of the Moon.
+- Transits are shown through a white-light solar filter: a close-up of the Sun gets the exposure of its own surface, so the sky goes black.
+- Phobos crossing the Sun is shown from Perseverance's landing site (2 April 2022, 35 s).
+- Close passes by asteroids and comets (Apophis in 2029, 2023 BU at 3,600 km above the ground, and Hyakutake) show the object and its path around Earth.
+
+- **Computed, not copied** (`src/core/skyevents.ts`, `scripts/build-events.mjs` → `src/generated/events.json`). Events are found with the app's own DE440 positions and Earth orientation. The shadow geometry follows the Explanatory Supplement, with Danjon's enlargement of Earth's shadow, as NASA uses. Close-approach tracks are JPL Horizons state tables, interpolated (`src/core/track.ts`, `public/data/events/`).
+- **Gate:** `tests/events.test.ts` compares the events with NASA's catalogues (Espenak, NASA GSFC).
+  - Solar: all 224 eclipses found, none extra, and every type agrees. Greatest eclipse is within 0.5 s and its point within 0.9 km. Central durations are within 0.6 s.
+  - Lunar: all 230 found and every type agrees. Greatest eclipse is within 2.4 s, and magnitudes are within 0.0004.
+  - Transits: the same 16 as NASA. Contacts are within 2 s where NASA gives seconds.
+  - Phobos: the transit falls within 2.5 s of Perseverance's own Mastcam-Z frames.
+  - Tracks: within 0.3 km of held-out Horizons positions, and within 0.4 s of JPL's close-approach times.
+
+### Limits
+
+- **Terrain.**
+  - The sharp sites are small: about 3 km around Eagle, and about 4 km of HiRISE inside Jezero. Elsewhere Mars is about 5 km per height sample and 2.6 km per colour pixel.
+  - Viking's colours are approximate. Its brightness is stretched for display, and the colour comes from a dust/basalt blend.
+- **Light.**
+  - The Mars sky is single scattering with a fixed factor for light scattered more than once. There are no dust storms or seasons.
+  - The ground has no shadows cast by hills or by the landers.
+- **Walking.**
+  - No spacesuit: the walking and jumping figures are for an unencumbered person.
+  - Your feet follow the finest terrain loaded, which can differ from the coarser mesh drawn far away.
+- **Events.**
+  - Delta T after 2026 is held at its 2026 value, while NASA extrapolates it to about 115 s by 2060. Eclipse paths after 2026 match the app's Earth, and sit up to 20 km in longitude from NASA's by 2060.
+  - Comets have no tails.
+
+## Flight mode
 
 Besides picking a name and flying there, you can now pilot a ship yourself. `Pilot a ship` (top right, or `?fly=1`) hands you the controls where the camera is; `Leave the ship` (or Esc) gives the camera back.
 
@@ -164,7 +214,7 @@ Views can be linked with URL parameters, for example `?focus=Earth&lat=36.075&lo
 ```sh
 npm install
 npm run dev          # http://localhost:5173
-npm test             # ephemeris, Horizons, orientation, rotation, moons, eclipse, satellites, jitter, time, sky, galaxy, black hole and flight tests
+npm test             # ephemeris, Horizons, orientation, rotation, moons, eclipse, satellites, jitter, time, sky, galaxy, black hole, flight, walking and events tests
 npm run build
 npm run screenshot   # renders reference views to screenshots/ (headless Chromium)
 ```
@@ -215,6 +265,15 @@ python3 pipeline/build_galaxies.py $DATA public/data
 python3 pipeline/fetch_images.py $DATA public/data   # DSS2 colour via CDS hips2fits, Gaia DR3 for the foreground stars
 python3 pipeline/build_cmb.py $DATA public/data
 
+# Mars, Tranquility Base and Jezero crater: MOLA, Viking, LRO NAC, Mars 2020 CTX and HiRISE
+python3 pipeline/fetch_surfaces.py $DATA/surf
+python3 pipeline/build_surfaces.py $DATA/surf public/data/tiles src/generated/tiles.json   # --only mars,apollo11,jezero
+
+# Sky events: NASA's catalogues for the gate, Horizons tracks, then the events themselves
+python3 pipeline/fetch_event_reference.py tests/fixtures/events-reference.json
+python3 pipeline/fetch_approaches.py public/data/events tests/fixtures/approaches-reference.json
+node scripts/build-events.mjs
+
 # Black holes: the S-stars and the EHT images
 python3 pipeline/fetch_blackholes.py $DATA public/data   # VizieR (Gillessen et al. 2017), ESO image archive
 ```
@@ -253,4 +312,9 @@ Tiles are geographic: level L has 2^(L+1) × 2^L tiles of 180/2^L degrees. Colou
 - Milky Way structure: Reid et al. (2019) spiral arms, GRAVITY Collaboration (2022) Galactic Centre distance, Bland-Hawthorn and Gerhard (2016) review values for the discs, bulge and bar.
 - Black holes: GRAVITY Collaboration (2020, 2022) for Sgr A* and S2; Gillessen et al. (2017) S-star orbits via VizieR; Gebhardt et al. (2011) and Walker et al. (2018) for M87*; El-Badry et al. (2023) for Gaia BH1 and BH2; Gaia Collaboration, Panuzzo et al. (2024) for Gaia BH3; Miller-Jones et al. (2021) and Zhao et al. (2021) for Cygnus X-1; Bardeen (1973); Page and Thorne (1974); Gralla, Lupsasca and Marrone (2020).
 - Event Horizon Telescope images of M87* (2019) and Sgr A* (2022): EHT Collaboration, CC BY 4.0, via ESO (eso1907a, eso2208-eht-mwa).
-- NASA eclipse predictions by Fred Espenak (eclipse.gsfc.nasa.gov) for the 2027 path test; IERS Bulletin A for UT1.
+- NASA eclipse predictions by Fred Espenak (eclipse.gsfc.nasa.gov) for the 2027 path test and the sky events gate (Five Millennium Canons of solar and lunar eclipses, transits of Mercury and Venus); IERS Bulletin A for UT1.
+- MGS MOLA MEGDR (NASA/GSFC, PDS Geosciences Node); Viking MDIM 2.1 colour mosaic (USGS Astrogeology), via NASA Trek.
+- LRO NAC elevation model and image of the Apollo 11 site (NASA/GSFC/Arizona State University).
+- Mars 2020 Terrain Relative Navigation CTX and HiRISE elevation models and orthoimages of Jezero crater (USGS Astrogeology, NASA/JPL/University of Arizona).
+- JPL Horizons state vectors and the SBDB Close-Approach Data API for close approaches; NAIF Mars 2020 landing-site and clock kernels; Mars 2020 Mastcam-Z raw images (NASA/JPL-Caltech/ASU) for the Phobos transit check.
+- Dust properties: Wolff et al. (2009); gait: Minetti (2001), Kram et al. (1997).
