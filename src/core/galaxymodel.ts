@@ -115,12 +115,22 @@ function sample(map: Float32Array, w: number, h: number, R: number, x: number, y
   return (a * (1 - fu) + b * fu) * (1 - fv) + (c * (1 - fu) + d * fu) * fv;
 }
 
+/**
+ * The bulge fades out inside the model's box (an ellipsoid touching its faces), so a
+ * Sersic profile's long wings don't end at the box's flat sides.
+ */
+export function bulgeTaper(spec: GalaxyModelSpec, p: Vec3): number {
+  const e = Math.hypot(p[0] / spec.R, p[1] / spec.R, p[2] / spec.H);
+  const t = Math.min(Math.max((e - 0.7) / 0.3, 0), 1);
+  return 1 - t * t * (3 - 2 * t);
+}
+
 /** Light emitted per kpc^3 (luminance) and dust opacity per kpc at a point (model frame, kpc). */
 export function modelDensity(spec: GalaxyModelSpec, maps: FaceMaps | undefined, p: Vec3): { j: number; kappa: number } {
   const b = spec.bulge;
   const m = Math.hypot(p[0], p[1], p[2] / b.q0) / b.re;
   const s = Math.max(m, 1e-3);
-  let j = b.rho0 * s ** -b.p * Math.exp(-b.b * s ** (1 / b.n));
+  let j = b.rho0 * s ** -b.p * Math.exp(-b.b * s ** (1 / b.n)) * bulgeTaper(spec, p);
   let kappa = 0;
   if (spec.kind === 'disc' && maps) {
     const z0 = spec.z0!, zd = spec.zd!;
