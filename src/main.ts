@@ -25,6 +25,7 @@ import { BlackHoles, type SStar } from './blackholes';
 import { EhtPanel, type EhtMeta } from './ui/ehtpanel';
 import { MPC_KM, type GalaxyIndex } from './core/galaxies';
 import type { SkyImage } from './render/images';
+import type { GalaxyModelSpec } from './core/galaxymodel';
 import { CmbLayer } from './render/cmb';
 import { PC_KM, apparentMagnitude, namedStarPosition, parseStarIndex, yearsSinceEpoch, type Exoplanet, type NamedStar } from './core/stars';
 import { NAMED_SATELLITES, SatelliteLayer } from './render/satellites';
@@ -78,7 +79,7 @@ interface Target {
 }
 
 async function main() {
-  const [ephemeris, orientation, starIndexRaw, namedStars, constellationData, dust, cloudTexture, satelliteSnapshot, smallBuffer, asteroidsBuffer, cometData, asteroidNames, saturnRings, galaxyIndex, galaxyBuffer, skyImages, sstarData, ehtMeta] = await Promise.all([
+  const [ephemeris, orientation, starIndexRaw, namedStars, constellationData, dust, cloudTexture, satelliteSnapshot, smallBuffer, asteroidsBuffer, cometData, asteroidNames, saturnRings, galaxyIndex, galaxyBuffer, skyImages, sstarData, ehtMeta, galaxyModels] = await Promise.all([
     Ephemeris.load(`${BASE}data/de440.bin`),
     Orientation.load(`${BASE}data/orientation.bin`),
     fetch(`${BASE}data/stars/index.json`).then((r) => r.json()),
@@ -97,6 +98,7 @@ async function main() {
     fetch(`${BASE}data/images/index.json`).then((r) => r.json() as Promise<{ images: SkyImage[] }>).then((j) => j.images).catch(() => [] as SkyImage[]),
     fetch(`${BASE}data/blackholes/sstars.json`).then((r) => r.json() as Promise<{ stars: SStar[] }>).then((j) => j.stars).catch(() => [] as SStar[]),
     fetch(`${BASE}data/blackholes/eht.json`).then((r) => r.json() as Promise<Record<string, EhtMeta>>).catch(() => ({}) as Record<string, EhtMeta>),
+    fetch(`${BASE}data/galaxies/models.json`).then((r) => r.json() as Promise<{ models: GalaxyModelSpec[] }>).then((j) => j.models).catch(() => [] as GalaxyModelSpec[]),
   ]);
   if (smallBuffer) ephemeris.add(smallBuffer);
   const asteroids: AsteroidSet | undefined = asteroidsBuffer ? parseAsteroids(asteroidsBuffer) : undefined;
@@ -140,7 +142,7 @@ async function main() {
   scene.add(glow.composite);
   const deep = new DeepSky(
     galaxyIndex, galaxyBuffer, skyImages, renderer.getPixelRatio(), Math.min(8, renderer.capabilities.getMaxAnisotropy()),
-    `${BASE}data/galaxies/deep.bin`, `${BASE}data/images/`,
+    `${BASE}data/galaxies/deep.bin`, `${BASE}data/images/`, galaxyModels, `${BASE}data/galaxies/models/`, quality === 'low' ? 72 : 160,
   );
   scene.add(deep.layer.group);
   let cmb: CmbLayer | undefined;

@@ -61,12 +61,14 @@ New targets: `?focus=Sgr%20A*`, `M87*`, `Gaia BH1`, `Gaia BH2`, `Gaia BH3`, `Cyg
 
 - **The Milky Way's glow, from inside and out** (`src/core/milkyway.ts`, `src/render/milkyway.ts`). The diffuse light is not a photograph: it is ray-marched through a model of the Galaxy every frame, so it is right from anywhere. The model has thin and thick discs, the boxy bulge and long bar (Dwek G2 shapes, bar at 28°), and spiral arms traced from masers (Reid et al. 2019, extrapolated on the far side). The Sun sits 8.277 kpc from the centre (GRAVITY 2022), 20.8 pc above the plane (Bennett and Bovy 2019). The disc is normalised to the local luminosity density measured from the app's own star catalogue (`pipeline/build_milkyway.py`), which gives a total M_V of -21.4. Only the light of stars fainter than those drawn is added, so the glow and the stars never double-count. Dust is the Edenhofer 3D map near the Sun and a model dust disc beyond, so the Great Rift and the dark lanes come out of the same dust that dims the stars. The view from outside is labelled as modelled.
 - **156,125 galaxies, plus 834,710 more from SDSS** (`pipeline/build_galaxies.py`). Measured distances come first: the Updated Nearby Galaxy Catalog (Cepheids, the tip of the red giant branch) and Cosmicflows-4 (Tully-Fisher, fundamental plane, supernovae, surface brightness fluctuations), using Cosmicflows-4 group distances for groups with at least two members. All other galaxies (2MRS, 6dFGS, SDSS) are placed by their CMB-frame redshift in flat ΛCDM with H0 = 74.6 (the Cosmicflows-4 scale). Redshift-only galaxies in the cores of the big clusters are placed at the cluster's distance, so the clusters are not stretched into "fingers of God". Each galaxy has its measured size, shape, orientation, colour and Milky Way extinction (SFD). Nearby ones are drawn as inclined discs or spheroids with their light spread to their true surface brightness; distant ones are points. 139 globular clusters (Harris 2010) are included.
-- **Telescope images of the nearest galaxies and bright nebulae** (`pipeline/fetch_images.py`, `src/render/images.ts`). About 65 galaxies and 26 nebulae use Digitized Sky Survey 2 colour images. Foreground stars are removed using Gaia DR3 parallaxes and proper motions, since the app draws those stars itself. Disc galaxies are laid in their own planes, deprojected with their inclination, so you can fly around Andromeda. Nebulae and ellipticals face the camera, which is how Earth sees them. Every image is scaled so its total light matches the object's catalogue magnitude.
+- **The nearest galaxies in 3D** (`pipeline/build_galaxy_models.py`, `src/render/galaxymodels.ts`). 60 galaxies, Andromeda, Triangulum, the Magellanic Clouds, the Whirlpool, the Sombrero and others, are volumes you can fly around and through, ray-marched on the GPU. Each is built from a survey image: SDSS DR9 g, r, i (linear CCD fluxes) where SDSS covers it, else the Digitized Sky Survey 2 red and blue plates, linearised. Foreground stars are removed using Gaia DR3. The image is split into a Sérsic bulge (fitted in 2D, deprojected to an oblate spheroid with the Prugniel–Simien profile) and a disc, which is deprojected with the galaxy's inclination into a face-on map. The disc's smooth light is in a thick sech² layer; its knots and fine structure, with the dust, in a thin one. Dust lanes come from where the image is both redder and fainter than its surroundings and are put on the near side; a smooth exponential dust disc with a hole for the bulge is added, and the disc's and bulge's light are corrected for the dimming the dust causes as seen from Earth. Edge-on galaxies get a smooth disc with their measured light and thickness. Interacting companions (NGC 5195) are fitted, taken out of their partner's picture and drawn at their own place.
+- **Telescope images of bright nebulae** (`pipeline/fetch_images.py`, `src/render/images.ts`). 26 nebulae use Digitized Sky Survey 2 colour images, faced to the camera as Earth sees them, with Gaia DR3 foreground stars removed. Every image and model is scaled so its total light matches the object's catalogue magnitude.
 - **Galaxy clusters and the Local Group.** Search the Virgo, Fornax, Coma, Perseus, Centaurus and Hydra clusters, the Leo Triplet, the M81 and Sculptor groups and the Local Group. Labels show the brightest named galaxies in view.
 - **The cosmic web.** Out among the galaxies, the exposure lengthens with the scale of the view, as a telescope's would, so the filaments and voids of the redshift surveys show.
 - **The cosmic microwave background** (`pipeline/build_cmb.py`, `src/render/cmb.ts`). The Planck PR3 SMICA map is drawn in false colour (±500 µK) on the sphere of last scattering, 12,800 comoving Mpc away. It appears on its own beyond 1.5 Gpc and can be turned on from Earth with the `Microwave background` button (`cmb=1`).
 - **Search and panel.** Every named galaxy, cluster and nebula is searchable. The panel shows the distance and how it was measured, the light travel time, the size and the brightness from the camera.
 - **Gate:** Andromeda and the Virgo Cluster sit at their measured distances (`tests/galaxies.test.ts`, against `tests/fixtures/galaxy-reference.json`, independent of the pipeline's inputs).
+- **Gate:** seen from Earth, the 3D models of the Whirlpool, Andromeda, the Sombrero, the Needle, Triangulum and M87 hold the light of the survey images they were built from (within 15%) and look like them (correlation of square-root brightness above 0.95): `tests/galaxymodels.test.ts` ray-traces each model on the CPU in the app's own frame (`src/core/galaxymodel.ts`, the shader's twin).
   - Andromeda is drawn 770 kpc away, against 761 ± 11 kpc from HST Cepheids (Li et al. 2021).
   - The Virgo Cluster is 16.2 Mpc away, against 16.5 ± 1.1 Mpc from surface brightness fluctuations (Mei et al. 2007). The Fornax Cluster is 19.7 Mpc away, against 20.0 ± 1.4 Mpc (Blakeslee et al. 2009). The LMC is 50.0 kpc away, against 49.59 ± 0.55 kpc (Pietrzyński et al. 2019).
   - Positions are within 1' of NED, and float32 rounding on the GPU stays under a pixel at 4K from Earth, from beside Andromeda and from the Virgo Cluster.
@@ -76,7 +78,7 @@ New targets: `?focus=Milky%20Way`, `Andromeda Galaxy` (or `M31`), `Local Group`,
 ### Limits
 
 - The Milky Way seen from outside is a model: its arms beyond the Galactic Centre are extrapolated, and it has no star clusters or HII regions of its own.
-- Galaxy images are DSS2 photographic plates: bright cores are saturated, and a deprojected image of a steeply inclined galaxy (Andromeda is 77° from face-on) smears its bulge into the disc. From the far side of a nebula you see its picture from Earth.
+- A galaxy model is one image deprojected: what a disc looks like from above is inferred from one slanted view, so a steeply inclined galaxy (Andromeda is 77° from face-on) is blurred across its minor axis, and spiral structure behind the bulge is not seen. Photographic plates saturate bright cores; there the bulge's profile is bounded by the saturated pixels and the disc is carried in smoothly. From the far side of a nebula you see its picture from Earth.
 - Redshift distances carry each galaxy's own motion (about 300 km/s, or 4 Mpc at H0 = 74.6), except in the cluster cores. SDSS covers only a quarter of the sky, so the deep cosmic web is one-sided.
 - The CMB layer is the map we see, on our own sphere of last scattering: from elsewhere the true microwave sky would differ.
 
@@ -164,7 +166,7 @@ Views can be linked with URL parameters, for example `?focus=Earth&lat=36.075&lo
 ```sh
 npm install
 npm run dev          # http://localhost:5173
-npm test             # ephemeris, Horizons, orientation, rotation, moons, eclipse, satellites, jitter, time, sky, galaxy, black hole and flight tests
+npm test             # ephemeris, Horizons, orientation, rotation, moons, eclipse, satellites, jitter, time, sky, galaxy, 3D galaxy, black hole and flight tests
 npm run build
 npm run screenshot   # renders reference views to screenshots/ (headless Chromium)
 ```
@@ -218,7 +220,8 @@ python3 pipeline/make_sky_fixtures.py $DATA tests/fixtures/sky-reference.json
 python3 pipeline/build_milkyway.py public/data src/generated/milkyway.json
 python3 pipeline/fetch_galaxies.py $DATA       # UNGC, Cosmicflows-4, 2MRS, 6dFGS, PGC, Harris (VizieR), SDSS DR18, SFD, Planck
 python3 pipeline/build_galaxies.py $DATA public/data
-python3 pipeline/fetch_images.py $DATA public/data   # DSS2 colour via CDS hips2fits, Gaia DR3 for the foreground stars
+python3 pipeline/fetch_images.py $DATA public/data   # nebulae: DSS2 colour via CDS hips2fits, Gaia DR3 for the foreground stars
+python3 pipeline/build_galaxy_models.py $DATA public/data   # 3D galaxies: SDSS DR9 / DSS2 via hips2fits, Gaia DR3; writes tests/fixtures/galaxy-models-reference.json
 python3 pipeline/build_cmb.py $DATA public/data
 
 # Black holes: the S-stars and the EHT images
@@ -252,7 +255,7 @@ Tiles are geographic: level L has 2^(L+1) × 2^L tiles of 180/2^L degrees. Colou
 - SDO/HMI continuum intensitygram (NASA/SDO and the HMI science team).
 - JPL Small-Body Database (asteroid and comet orbits).
 - Updated Nearby Galaxy Catalog (Karachentsev et al. 2013); Cosmicflows-4 (Tully et al. 2023); 2MASS Redshift Survey (Huchra et al. 2012); 6dF Galaxy Survey (Jones et al. 2009); HyperLEDA/PGC (Paturel et al. 2003); Harris (1996, 2010 edition) globular clusters; all via VizieR (CDS, Strasbourg).
-- Sloan Digital Sky Survey DR18 (SDSS-V collaboration), via SkyServer. Funding for the SDSS has been provided by the Alfred P. Sloan Foundation and the participating institutions.
+- Sloan Digital Sky Survey DR18 (SDSS-V collaboration), via SkyServer; SDSS DR9 images via CDS hips2fits. Funding for the SDSS has been provided by the Alfred P. Sloan Foundation and the participating institutions.
 - Schlegel, Finkbeiner and Davis (1998) dust map, via NASA LAMBDA.
 - Planck PR3 SMICA CMB map (ESA and the Planck Collaboration 2020), via CDS hips2fits.
 - The Digitized Sky Surveys were produced at the Space Telescope Science Institute under U.S. Government grant NAG W-2166, from photographic data of the Palomar (POSS-II, Caltech) and UK Schmidt (Royal Observatory Edinburgh, AAO) telescopes; colour HiPS by CDS, via hips2fits.

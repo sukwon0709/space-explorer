@@ -5,7 +5,9 @@ import {
   type GalaxyBlock, type GalaxyIndex,
 } from './core/galaxies';
 import { R0, galactocentricToIcrsPc, totalLuminosity, ICRS_TO_GAL } from './core/milkyway';
+import { modelAxes, type GalaxyModelSpec, type ModelAxes } from './core/galaxymodel';
 import { GalaxyLayer } from './render/galaxies';
+import { GalaxyModelLayer } from './render/galaxymodels';
 import { ImageLayer, type SkyImage } from './render/images';
 import type { Frame } from './render/camera';
 import { formatLightYearCount, formatYears } from './ui/format';
@@ -50,8 +52,11 @@ const SGR_A = { ra: 266.41683708, dec: -29.00781056, pc: R0 * 1000 };
 export class DeepSky {
   readonly layer: GalaxyLayer;
   readonly images: ImageLayer;
+  readonly models: GalaxyModelLayer;
+  /** 3D models by catalogue index: centre (Mpc, at the nucleus) and axes. */
+  private readonly modelOf = new Map<number, { spec: GalaxyModelSpec; centre: Vec3; axes: ModelAxes }>();
   private readonly nebulae: SkyImage[] = [];
-  private readonly imageNames = new Set<number>();
+  private readonly modelled = new Set<number>();
   private extinction = 1;
   private andromeda = -1;
   readonly targets: DeepTarget[] = [];
@@ -71,10 +76,15 @@ export class DeepSky {
     anisotropy: number,
     private readonly deepUrl: string,
     imageUrl: string,
+    modelList: GalaxyModelSpec[] = [],
+    modelUrl = '',
+    modelSteps = 160,
   ) {
     this.layer = new GalaxyLayer(pixelRatio);
     this.images = new ImageLayer(imageUrl, anisotropy, pixelRatio);
+    this.models = new GalaxyModelLayer(modelUrl, anisotropy, pixelRatio, modelSteps);
     this.layer.group.add(this.images.group);
+    this.layer.group.add(this.models.group);
     this.cosmology = new Cosmology(index?.H0 ?? 74.6, index?.omegaM ?? 0.3);
     const g = ICRS_TO_GAL;
     this.galacticPole = icrfToScene([g[6], g[7], g[8]]);
@@ -90,7 +100,7 @@ export class DeepSky {
         this.targets.push({ id: CLUSTER_ID + k, name: c.name, kind: 'galaxy cluster', radius: c.radius * MPC_KM, aliases: [] });
       });
       this.andromeda = index.named.findIndex((g) => g.name === 'Andromeda Galaxy');
-      this.addImages(imageList);
+      this.addModels(modelList);
     }
     for (const n of imageList) {
       if (n.kind === 'galaxy' || n.dist === undefined) continue;
@@ -110,33 +120,30 @@ export class DeepSky {
     return id >= GALAXY_ID && id <= LOCAL_GROUP_ID && id !== SGR_A_ID && (id < NEBULA_ID || id >= MILKY_WAY_ID || id - NEBULA_ID < this.nebulae.length);
   }
 
-  /** Telescope images for the galaxies that have one: the catalogue hands each over to its image as it resolves. */
-  private addImages(list: SkyImage[]): void {
+  /** 3D models of the nearest galaxies: the catalogue hands each over to its model as it resolves. */
+  private addModels(list: GalaxyModelSpec[]): void {
     const b = this.local!, index = this.index!;
     const byName = new Map(index.named.map((g) => [g.name, g]));
-    for (const image of list) {
-      if (image.kind !== 'galaxy') continue;
-      const g = byName.get(image.name);
-      if (!g || this.imageNames.has(g.i)) continue;
-      this.imageNames.add(g.i);
+    for (const spec of list) {
+      const g = byName.get(spec.name);
+      if (!g || this.modelled.has(g.i)) continue;
+      this.modelled.add(g.i);
       const i = g.i;
-      const centre = galaxyPosition(b, i);
+      // Centred on the nucleus, at the catalogue's distance (an interacting companion at its partner's).
+      const partner = spec.with ? byName.get(spec.with) : undefined;
+      const d = Math.hypot(...galaxyPosition(b, partner ? partner.i : i));
+      const ra = (spec.ra * Math.PI) / 180, dec = (spec.dec * Math.PI) / 180;
+      const centre: Vec3 = [d * Math.cos(dec) * Math.cos(ra), d * Math.cos(dec) * Math.sin(ra), d * Math.sin(dec)];
+      const axes = modelAxes(spec, centre);
+      this.modelOf.set(i, { spec, centre, axes });
       const absMag = galaxyAbsMag(b.absMag[i]);
       const av = 3.1 * b.ebv[i] * 0.01;
-      const spheroid = (b.flags[i] & FLAG_SPHEROID) !== 0;
-      this.images.add(image, {
+      this.models.add(spec, {
         centre,
-        distance: Math.hypot(centre[0], centre[1], centre[2]),
-        disc: spheroid ? undefined : discAxes(b, i),
-        magnitude: (d) => absMag + 5 * Math.log10(Math.max(d, 1e-12) * 1e5) + av * this.extinction,
+        axes,
+        magnitudeFromSun: () => absMag + 5 * Math.log10(d * 1e5) + av * this.extinction,
         handover: galaxyRadiusKpc(b.radius[i]) * 1e-3,
-      }, () => {
-        this.layer.markImage(b, 0, i);
-        for (const c of image.includes ?? []) {
-          const companion = byName.get(c);
-          if (companion) this.layer.markImage(b, 0, companion.i);
-        }
-      });
+      }, () => this.layer.markImage(b, 0, i));
     }
   }
 
@@ -191,7 +198,15 @@ export class DeepSky {
       for (let k = 0; k < 3; k++) out[k] *= c.dist / (1 + z) / d;
       return out;
     }
-    return galaxyPosition(this.local, this.index.named[id - GALAXY_ID].i, out);
+    const i = this.index.named[id - GALAXY_ID].i;
+    const model = this.modelOf.get(i);
+    if (model) {
+      out[0] = model.centre[0];
+      out[1] = model.centre[1];
+      out[2] = model.centre[2];
+      return out;
+    }
+    return galaxyPosition(this.local, i, out);
   }
 
   /** Scene position (km). */
@@ -208,7 +223,11 @@ export class DeepSky {
     if (id === MILKY_WAY_ID || id === SGR_A_ID || id === LOCAL_GROUP_ID) up = this.galacticPole;
     else if (id >= GALAXY_ID && id < CLUSTER_ID && this.local) {
       const i = this.index!.named[id - GALAXY_ID].i;
-      if (!(this.local.flags[i] & FLAG_SPHEROID)) {
+      const model = this.modelOf.get(i);
+      if (model) {
+        up = icrfToScene(model.axes.z);
+        ref = icrfToScene(model.axes.x);
+      } else if (!(this.local.flags[i] & FLAG_SPHEROID)) {
         const { normal, major } = discAxes(this.local, i);
         up = icrfToScene(normal);
         ref = icrfToScene(major);
@@ -226,6 +245,18 @@ export class DeepSky {
     if (id === LOCAL_GROUP_ID) return { distance: 2.4 * MPC_KM, yaw: 0.5, pitch: 0.45 };
     if (id >= NEBULA_ID && id < MILKY_WAY_ID) return { distance: radius * 4, yaw: 0, pitch: 0.1 };
     if (id >= CLUSTER_ID) return { distance: radius * 3, yaw: 0.3, pitch: 0.4 };
+    const model = id >= GALAXY_ID && this.index ? this.modelOf.get(this.index.named[id - GALAXY_ID].i) : undefined;
+    if (model) {
+      // From where Earth sees it (the pictures are taken from here), turned a little so
+      // that its depth shows.
+      const { x, y, z } = model.axes;
+      const toEarth = normalise(scale3(model.centre, -1));
+      const pitch = Math.asin(Math.max(-1, Math.min(1, dot3(toEarth, z))));
+      const north = x, east = scale3(y, -1);
+      const h = scale3(sub3(toEarth, scale3(z, Math.sin(pitch))), -1);
+      const yaw = Math.atan2(dot3(h, east), dot3(h, north));
+      return { distance: radius * 3.2, yaw: yaw + 0.25, pitch: pitch + 0.12 * Math.sign(pitch || 1) };
+    }
     return { distance: radius * 3.2, yaw: 0.3, pitch: 0.9 };
   }
 
@@ -241,6 +272,7 @@ export class DeepSky {
     this.layer.update(cameraMpc, msat, pixelsPerRadian, brightness, extinction);
     const sigma = this.layer.uniforms.uSigma.value * this.layer.uniforms.uPixelRatio.value;
     this.images.update(cameraMpc, msat, pixelsPerRadian, brightness, 2 * Math.PI * sigma * sigma);
+    this.models.update(cameraMpc, msat, pixelsPerRadian, brightness, 2 * Math.PI * sigma * sigma);
     if (!this.deepRequested && this.index && (fromSun > 8 || lookDistanceKm > 8 * MPC_KM)) {
       this.deepRequested = true;
       fetch(this.deepUrl)
@@ -296,7 +328,7 @@ export class DeepSky {
       lines.push(`${formatLightYearCount((n.dist ?? 0) * 3.261563777)} from the Sun (${n.source})`);
       lines.push(`About ${formatLightYearCount(2 * this.nebulaRadiusPc(n) * 3.261563777)} across`);
       lines.push(`Magnitude ${(n.V ?? 0).toFixed(1)} from Earth`);
-      lines.push(n.within ? `In the ${n.within}, drawn in its picture` : 'Picture: DSS2 colour plates, as seen from Earth');
+      lines.push(n.within ? `In the ${n.within}, part of its 3D model` : 'Picture: DSS2 colour plates, as seen from Earth');
     } else if (id >= CLUSTER_ID && this.index) {
       const c = this.index.clusters[id - CLUSTER_ID];
       lines.push(`Galaxy cluster around ${c.centre}`);
@@ -320,6 +352,13 @@ export class DeepSky {
       lines.push(`Absolute magnitude ${absMag.toFixed(1)}; ${(absMag + 5 * Math.log10(Math.max(fromHere, 1e-9) * 1e5)).toFixed(1)} from here`);
       if (g.v !== undefined && g.v !== null && !globular) lines.push(g.v >= 0 ? `Receding at ${g.v.toLocaleString('en-US')} km/s` : `Approaching at ${(-g.v).toLocaleString('en-US')} km/s`);
       lines.push(`Light travel time ${formatYears(this.cosmology.lightTravelYears(fromSun))}`);
+      const model = this.modelOf.get(g.i)?.spec;
+      if (model) {
+        const from = model.survey === 'SDSS' ? 'SDSS' : 'DSS2 plate';
+        lines.push(model.kind === 'spheroid'
+          ? `3D model from ${from} images: Sérsic n = ${model.bulge.n}`
+          : `3D model from ${from} images: bulge ${Math.round((model.bulge.L / (model.bulge.L + (model.discL ?? 0))) * 100)}% of the starlight, disc tilted ${Math.round((Math.acos(model.cosi ?? 1) * 180) / Math.PI)}° to our view`);
+      }
     }
     lines.push(`Camera ${formatLightYearCount((cameraDistanceKm / MPC_KM) * LY_PER_MPC)} from its centre`);
     return lines;
