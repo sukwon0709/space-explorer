@@ -58,6 +58,20 @@ const views = {
   'orion-nebula': `focus=Orion%20Nebula&t=${T}`,
   'orion-from-earth': `focus=Earth&t=${T}&dist=400000&sky=83.8,-5.4&fov=12`,
   'whirlpool': `focus=Whirlpool%20Galaxy&t=${T}`,
+  // The nearest galaxies in 3D.
+  'andromeda-above': `focus=Andromeda%20Galaxy&t=${T}&pitch=0.6&yaw=0.3`,
+  'andromeda-edge': `focus=Andromeda%20Galaxy&t=${T}&pitch=0.08&yaw=1.2`,
+  'whirlpool-edge': `focus=Whirlpool%20Galaxy&t=${T}&pitch=0.1&yaw=1.0`,
+  // Up close, where the survey images run out of detail: resolved stars, clusters, HII
+  // regions and dust filaments fill in below their resolution.
+  'andromeda-close': `focus=Andromeda%20Galaxy&t=${T}&dist=6e17&pitch=0.5&yaw=0.3`,
+  'andromeda-inside': `focus=Andromeda%20Galaxy&t=${T}&dist=1.5e17&pitch=0.12&yaw=0.8`,
+  'whirlpool-close': `focus=Whirlpool%20Galaxy&t=${T}&dist=4e17&pitch=0.9`,
+  'sombrero-close': `focus=Sombrero%20Galaxy&t=${T}&dist=4e17&pitch=0.05`,
+  'triangulum': `focus=Triangulum%20Galaxy&t=${T}`,
+  'sombrero': `focus=Sombrero%20Galaxy&t=${T}`,
+  'needle': `focus=Needle%20Galaxy&t=${T}`,
+  'large-magellanic-cloud': `focus=Large%20Magellanic%20Cloud&t=${T}`,
   'virgo-cluster': `focus=Virgo%20Cluster&t=${T}`,
   'cosmic-web': `focus=Milky%20Way&t=${T}&dist=2e22&pitch=0.5`,
   'microwave-sky': `focus=Earth&t=${T}&dist=400000&sky=266.4,-28.9&fov=120&cmb=1`,

@@ -77,12 +77,14 @@ const SPIN_TIME = 0.12;
 /** Turn rates (rad/s) at full stick: pitch, yaw, roll. */
 const TURN_RATE: Vec3 = [0.9, 0.9, 1.4];
 /** Warp: seconds to cover the gap to whatever is ahead (in), or behind (out). */
-const WARP_TAU_IN = 2;
+const WARP_TAU_IN = 1;
 const WARP_TAU_OUT = 0.3;
 /** Warp spools up by e per this many seconds, and is never slower than this (km/s). */
-const WARP_SPOOL = 0.45;
+const WARP_SPOOL = 0.2;
 const WARP_MIN = 30;
 export const WARP_MAX = 1e16 * C_KMS;
+/** Shift multiplies engine thrust by this. */
+export const BOOST = 30;
 
 export class Ship {
   ref: number;
@@ -96,7 +98,7 @@ export class Ship {
   /** Flight assist: holds still when the sticks are released. */
   assist = true;
   /** Engine acceleration, in g. */
-  power = 3;
+  power = 10;
   warp = { on: false, speed: 0, set: 0 };
   /** Body the ship is standing on. */
   landed?: number;
@@ -272,7 +274,7 @@ export class Ship {
 
   /** Engine acceleration (km/s^2, scene axes): the pilot's thrust, and flight assist's. */
   private engine(world: FlightWorld, tdb: number, input: ShipInput, h: number): Vec3 {
-    const max = this.power * G0 * (input.boost ? 10 : 1);
+    const max = this.power * G0 * (input.boost ? BOOST : 1);
     const axes = [this.right(), this.up(), this.forward()];
     const frame = this.frameVelocity(world, tdb);
     const out: Vec3 = [0, 0, 0];
@@ -372,7 +374,7 @@ export class Ship {
     const w = this.warp;
     if (input.warp !== 0) {
       if (!Number.isFinite(w.set)) w.set = w.speed;
-      w.set = Math.min(WARP_MAX, Math.max(WARP_MIN, w.set * Math.exp(input.warp * real * (input.boost ? 4 : 1.6))));
+      w.set = Math.min(WARP_MAX, Math.max(WARP_MIN, w.set * Math.exp(input.warp * real * (input.boost ? 6 : 3))));
     }
     // Short steps so the limit can follow the distance it is set by.
     const n = Math.max(1, Math.ceil(real / (1 / 120)));

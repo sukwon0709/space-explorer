@@ -1,4 +1,4 @@
-"""Telescope images of the nearest and largest galaxies and the bright nebulae.
+"""Telescope images of the bright nebulae (galaxies: pipeline/build_galaxy_models.py).
 
 Usage:
     python pipeline/fetch_images.py DATA_DIR public/data
@@ -37,20 +37,6 @@ from scipy import ndimage
 HIPS2FITS = "https://alasky.cds.unistra.fr/hips-image-services/hips2fits"
 GAIA_TAP = "https://gea.esac.esa.int/tap-server/tap/sync"
 
-# Galaxies with images, by their names in galaxies/index.json, and image width (px).
-GALAXIES = {
-    "Andromeda Galaxy": 1024, "Triangulum Galaxy": 1024, "Large Magellanic Cloud": 1024, "Small Magellanic Cloud": 1024,
-    "Sculptor Galaxy": 1024, "Bode's Galaxy": 768, "Cigar Galaxy": 512, "Whirlpool Galaxy": 768, "Pinwheel Galaxy": 768,
-    "Sombrero Galaxy": 512, "Southern Pinwheel Galaxy": 768, "Centaurus A": 768, "M87 (Virgo A)": 512, "Black Eye Galaxy": 512,
-    "Sunflower Galaxy": 512, "M106": 768, "NGC 300": 768, "NGC 55": 768, "M74": 512, "M77": 512, "M66": 512, "M65": 512,
-    "Needle Galaxy": 512, "NGC 891": 512, "NGC 2403": 768, "M94": 512, "IC 342": 768, "NGC 6946": 768, "M49": 512, "M86": 512,
-    "M84": 512, "M60": 512, "Fornax A": 512, "NGC 1365": 512, "NGC 1399": 512, "Whale Galaxy": 512, "M108": 512, "M109": 512,
-    "NGC 7331": 512, "NGC 2903": 512, "M100": 512, "M61": 512, "M99": 512, "M88": 512, "M90": 512, "M58": 512, "M95": 512,
-    "M96": 512, "M105": 512, "NGC 3115": 512, "NGC 4945": 768, "Antennae Galaxies": 512, "NGC 1300": 512, "NGC 1097": 512,
-    "NGC 2997": 512, "NGC 7793": 512, "NGC 247": 768, "NGC 4449": 512, "M110": 512, "M32": 256, "Barnard's Galaxy": 768,
-    "M83": 768, "M64": 512, "M63": 512, "M101": 768, "M81": 768, "M82": 512,
-}
-
 # Bright nebulae: centre (J2000), angular size of the image (degrees), distance (pc) with
 # its source, integrated V magnitude (Messier and NGC catalogue values) and kind.
 NEBULAE = [
@@ -82,10 +68,6 @@ NEBULAE = [
     ("Tarantula Nebula", ["30 Doradus", "NGC 2070"], "05 38 42", "-69 06 03", 0.7, 49590, "LMC, Pietrzyński et al. 2019", 8.0, "emission"),
 ]
 
-# Interacting companions kept in their partner's picture (not masked out, and not drawn
-# again by the app).
-COMPANIONS = {"Whirlpool Galaxy": ["NGC 5195"]}
-
 # Nebulae in a galaxy that has its own image.
 WITHIN = {"Tarantula Nebula": "Large Magellanic Cloud"}
 
@@ -115,11 +97,12 @@ def fetch(url: str, path: str, data: dict | None = None) -> bytes:
     return blob
 
 
-def gaia_foreground(ra: float, dec: float, radius: float, cache: str) -> np.ndarray:
+def gaia_foreground(ra: float, dec: float, radius: float, cache: str, glim: float | None = None) -> np.ndarray:
     """Gaia stars in the field that are in the foreground: ra, dec, G."""
     # Wide fields in the Galactic plane hold millions of Gaia stars: go less deep there
     # (the archive times out), which still removes every star the app draws itself.
-    glim = 11.5 if radius > 2 else 13 if radius > 0.8 else 16 if radius > 0.3 else 18.5
+    if glim is None:
+        glim = 11.5 if radius > 2 else 13 if radius > 0.8 else 16 if radius > 0.3 else 18.5
     query = (
         "SELECT ra, dec, phot_g_mean_mag AS g, parallax, parallax_over_error AS poe, pmra, pmdec FROM gaiadr3.gaia_source "
         f"WHERE 1 = CONTAINS(POINT(ra, dec), CIRCLE({ra:.5f}, {dec:.5f}, {radius:.4f})) AND phot_g_mean_mag < {glim}"
@@ -169,10 +152,15 @@ def tangent(ra0, dec0, ra, dec):
 
 
 def clean(img: np.ndarray, fov: float, ra0: float, dec0: float, stars: np.ndarray, others: list, nebula: bool = False) -> np.ndarray:
-    """Background-subtracted, star-free linear image (float, 0..)."""
-    n = img.shape[0]
+    """Background-subtracted, star-free linear image (float, 0..) from an 8-bit picture."""
+    return clean_linear((img / 255.0) ** 2.2, fov, ra0, dec0, stars, others, nebula)
+
+
+def clean_linear(lin: np.ndarray, fov: float, ra0: float, dec0: float, stars: np.ndarray, others: list, nebula: bool = False,
+                 star_scale: float = 1.0) -> np.ndarray:
+    """Background-subtracted, star-free linear image (float, 0..), north up and east left."""
+    n = lin.shape[0]
     pix = fov / n * 3600  # arcsec per pixel
-    lin = (img / 255.0) ** 2.2
     mask = np.zeros((n, n), bool)
     yy, xx = np.mgrid[0:n, 0:n]
 
@@ -191,7 +179,7 @@ def clean(img: np.ndarray, fov: float, ra0: float, dec0: float, stars: np.ndarra
     for ra, dec, g in stars:
         # The halo grows with brightness, but a bright star's hole stays small next to the
         # field (the brightest ones light their own nebulae).
-        cut(ra, dec, max(2.2 * pix, min(4.0 * 10 ** (0.18 * (16 - g)), 0.03 * fov * 3600)))
+        cut(ra, dec, max(2.2 * pix, min(4.0 * star_scale * 10 ** (0.18 * (16 - g)), 0.03 * fov * 3600)))
     # Other catalogue galaxies in the frame are filled in too: the app draws them in their
     # own places (from their own pictures or as models).
     for ra, dec, r in others:
@@ -200,10 +188,11 @@ def clean(img: np.ndarray, fov: float, ra0: float, dec0: float, stars: np.ndarra
     known = ~mask
     # Fill the holes from the surrounding light, at a scale about the holes' size.
     for sigma in (2, 6, 18, 54, 162, 486):
-        w = ndimage.gaussian_filter(known.astype(float), sigma)
+        sigma *= n / 1024 if n > 1024 else 1
+        w = blur(known.astype(float), sigma)
         todo = ~known & (w > 0.02)
         for c in range(3):
-            v = ndimage.gaussian_filter(out[..., c] * known, sigma) / np.maximum(w, 1e-6)
+            v = blur(out[..., c] * known, sigma) / np.maximum(w, 1e-6)
             out[..., c][todo] = v[todo]
         known |= todo
         if known.all():
@@ -218,6 +207,18 @@ def clean(img: np.ndarray, fov: float, ra0: float, dec0: float, stars: np.ndarra
     t = np.clip((1 - r) / (0.5 if nebula else 0.15), 0, 1)
     out *= (t * t * (3 - 2 * t))[..., None]
     return out
+
+
+def blur(a: np.ndarray, sigma: float) -> np.ndarray:
+    """Gaussian blur; wide ones on a reduced copy (the same result, much faster)."""
+    f = int(sigma // 6)
+    if f < 2:
+        return ndimage.gaussian_filter(a, sigma)
+    h, w = a.shape
+    H, W = -(-h // f) * f, -(-w // f) * f
+    small = np.pad(a, ((0, H - h), (0, W - w)), mode="edge").reshape(H // f, f, W // f, f).mean(axis=(1, 3))
+    small = ndimage.gaussian_filter(small, sigma / f)
+    return ndimage.zoom(small, f, order=1, grid_mode=True, mode="nearest")[:h, :w]
 
 
 def encode(lin: np.ndarray, path: str) -> list[float]:
@@ -263,20 +264,6 @@ def main() -> None:
     entries = {e["name"]: e for e in existing.get("images", [])}
     only = set(args.only.split(",")) if args.only else None
     jobs = []
-    seen = set()
-    for name, width in GALAXIES.items():
-        g = named.get(name)
-        if g is None or g["i"] in seen:
-            print(f"skipping {name}: not in the catalogue or already listed")
-            continue
-        seen.add(g["i"])
-        i = g["i"]
-        fov = float(min(16, max(0.05, 2.4 * r25_deg[i])))
-        job = dict(name=g["name"], kind="galaxy", ra=float(gra[i]), dec=float(gdec[i]), fov=fov, width=width, index=i)
-        if g["name"] in COMPANIONS:
-            job["includes"] = COMPANIONS[g["name"]]
-            job["skip"] = [named[c]["i"] for c in COMPANIONS[g["name"]]]
-        jobs.append(job)
     for name, aka, ra, dec, fov, dist, source, vmag, kind in NEBULAE:
         r, dd = hms(ra, dec)
         job = dict(name=name, aka=aka, kind=kind, ra=r, dec=dd, fov=fov, width=768 if fov > 1 else 512,
@@ -288,7 +275,7 @@ def main() -> None:
     def save() -> None:
         with open(os.path.join(out_dir, "index.json"), "w") as f:
             json.dump({"source": "DSS2 colour (POSS-II, UKSTU) via CDS hips2fits; foreground stars removed with Gaia DR3",
-                       "images": list(entries.values())}, f, indent=1)
+                       "images": [e for e in entries.values() if e["kind"] != "galaxy"]}, f, indent=1)
 
     bright = app_stars(args.out)
     failed = []

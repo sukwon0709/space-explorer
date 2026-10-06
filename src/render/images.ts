@@ -19,8 +19,6 @@ export interface SkyImage {
   dist?: number;
   source?: string;
   V?: number;
-  /** Interacting companions that are part of this galaxy's picture. */
-  includes?: string[];
   /** A nebula already in this galaxy's own image (it is a target, but not drawn again). */
   within?: string;
 }
@@ -31,11 +29,6 @@ export interface ImagePlacement {
   centre: Vec3;
   /** The object's distance from the Sun, Mpc (the image's angular scale holds there). */
   distance: number;
-  /**
-   * A disc galaxy is laid in its own plane (the image deprojected), with these axes
-   * (ICRS); anything else faces the camera, north up as seen from Earth.
-   */
-  disc?: { major: Vec3; normal: Vec3; cosI: number };
   /** Apparent magnitude of the whole object from a camera `d` Mpc away. */
   magnitude: (d: number) => number;
   /** Scale radius (Mpc) where the catalogue's own point or disc hands over to the image. */
@@ -48,18 +41,11 @@ uniform vec3 uRel;
 uniform vec3 uA;
 uniform vec3 uB;
 uniform vec2 uHalf;
-uniform vec3 uEast;
-uniform vec3 uNorth;
-uniform float uSkyScale;
-uniform float uDisc;
 uniform mat3 uIcrfToScene;
 varying vec2 vUv;
 void main() {
   vec3 off = corner.x * uHalf.x * uA + corner.y * uHalf.y * uB;
-  // A disc's image is where each point of the disc appears on Earth's sky (east left).
-  vUv = uDisc > 0.5
-    ? vec2(0.5 - dot(off, uEast) * uSkyScale, 0.5 + dot(off, uNorth) * uSkyScale)
-    : vec2(0.5 - 0.5 * corner.x, 0.5 + 0.5 * corner.y);
+  vUv = vec2(0.5 - 0.5 * corner.x, 0.5 + 0.5 * corner.y);
   vec3 p = uRel + off;
   // Shrink toward the camera (the picture is unchanged) to stay inside the projection's range.
   vec3 scene = uIcrfToScene * (p * (1e6 / max(length(uRel), 1e-12)));
@@ -92,10 +78,10 @@ interface Item {
 }
 
 /**
- * Telescope images of the nearest galaxies and the bright nebulae: disc galaxies laid in
- * their own planes, so they can be flown around; nebulae and elliptical galaxies as
- * camera-facing pictures, which is how Earth sees them. Each is scaled so that its total
- * light equals the object's catalogue magnitude, on the same scale as the galaxy layer.
+ * Telescope images of the bright nebulae, as camera-facing pictures (which is how Earth
+ * sees them; the nearest galaxies are 3D models, render/galaxymodels.ts). Each is scaled
+ * so that its total light equals the object's catalogue magnitude, on the same scale as
+ * the galaxy layer.
  */
 export class ImageLayer {
   readonly group = new THREE.Group();
@@ -125,10 +111,7 @@ export class ImageLayer {
       uA: { value: new THREE.Vector3() },
       uB: { value: new THREE.Vector3() },
       uHalf: { value: new THREE.Vector2() },
-      uEast: { value: new THREE.Vector3(...east) },
       uNorth: { value: new THREE.Vector3(...north) },
-      uSkyScale: { value: 1 / (((image.fov * Math.PI) / 180) * place.distance) },
-      uDisc: { value: place.disc ? 1 : 0 },
       uIcrfToScene: { value: this.icrfToScene },
       uTex: { value: null },
       uScale: { value: 0 },
@@ -136,7 +119,6 @@ export class ImageLayer {
     const material = new THREE.ShaderMaterial({
       uniforms, vertexShader, fragmentShader,
       blending: THREE.AdditiveBlending, depthTest: false, depthWrite: false, transparent: false,
-      // A disc is seen from both sides.
       side: THREE.DoubleSide,
     });
     const mesh = new THREE.Mesh(this.geometry, material);
@@ -171,28 +153,14 @@ export class ImageLayer {
       item.mesh.visible = wanted && item.state === 'ready';
       if (!item.mesh.visible) continue;
       const view: Vec3 = [rel[0] / d, rel[1] / d, rel[2] / d];
-      let tilt = 1;
-      let a: Vec3, b: Vec3;
-      if (place.disc) {
-        const { major, normal, cosI } = place.disc;
-        a = major;
-        b = cross(normal, major);
-        const k = Math.max(cosI, 0.25);
-        u.uHalf.value.set(half, half / k);
-        // Spread over the disc the image's light covers k times the sky area; seen at a
-        // slant it covers |n . view| of that on screen.
-        tilt = Math.max(Math.abs(dot(normal, view)), 0.15) / k;
-      } else {
-        const n = u.uNorth.value as THREE.Vector3;
-        const north = normalise(sub([n.x, n.y, n.z], scale(view, n.x * view[0] + n.y * view[1] + n.z * view[2])));
-        a = cross(north, view);
-        b = north;
-        u.uHalf.value.set(half, half);
-      }
+      const n = u.uNorth.value as THREE.Vector3;
+      const north = normalise(sub([n.x, n.y, n.z], scale(view, n.x * view[0] + n.y * view[1] + n.z * view[2])));
+      const a = cross(north, view), b = north;
+      u.uHalf.value.set(half, half);
       u.uRel.value.set(rel[0], rel[1], rel[2]);
       u.uA.value.set(a[0], a[1], a[2]);
       u.uB.value.set(b[0], b[1], b[2]);
-      const area = sizePx * sizePx * tilt;
+      const area = sizePx * sizePx;
       u.uScale.value = (flux * pointLight * fade) / (item.meanLuma * area);
     }
   }
@@ -213,7 +181,6 @@ export class ImageLayer {
   }
 }
 
-const dot = (a: Vec3, b: Vec3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 const sub = (a: Vec3, b: Vec3): Vec3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
 const scale = (a: Vec3, s: number): Vec3 => [a[0] * s, a[1] * s, a[2] * s];
 const cross = (a: Vec3, b: Vec3): Vec3 => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
