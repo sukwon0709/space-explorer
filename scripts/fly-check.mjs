@@ -40,16 +40,13 @@ await page.keyboard.down('w');
 await page.waitForTimeout(3000);
 await page.keyboard.up('w');
 await show('after thrust');
-await page.keyboard.press('t');
-await page.waitForTimeout(5000);
+// One press: turn toward the Moon, then warp.
 await page.keyboard.press('x');
 await until('warp to the Moon', (r) => /Arrived|Dropped/.test(r.message), 240);
 await page.screenshot({ path: `${out}-moon.png` });
 await page.locator('#search').fill('Sirius');
 await page.locator('#search').press('Enter');
 await page.waitForTimeout(500);
-await page.keyboard.press('t');
-await page.waitForTimeout(6000);
 await page.keyboard.press('x');
 await show('warp engaged');
 await until('warp to Sirius', (r) => /Arrived|Dropped/.test(r.message), 900);

@@ -78,7 +78,7 @@ export class FlightControls {
     left.append(hold('Thrust', 'KeyW', 'Forward thrust (W)'), hold('Reverse', 'KeyS', 'Reverse thrust (S)'), hold('⟲', 'KeyQ', 'Roll left (Q)'), hold('⟳', 'KeyE', 'Roll right (E)'));
     const right = document.createElement('div');
     right.className = 'pad-group';
-    right.append(tap('Warp', actions.warp, 'Warp drive on or off (X)'), tap('Assist', actions.assist, 'Flight assist on or off (Z)'), tap('Aim', actions.align, 'Turn toward the target (T)'), tap('Jump', actions.jump, 'Jump to the target (G)'));
+    right.append(tap('Go', actions.warp, 'Fly to the destination, or warp ahead; again to stop (X)'), tap('Assist', actions.assist, 'Flight assist on or off (Z)'), tap('Aim', actions.align, 'Turn toward the target (T)'), tap('Jump', actions.jump, 'Jump to the target (G)'));
     this.pad.append(left, right);
     document.body.append(this.pad);
   }
@@ -154,11 +154,11 @@ export class FlightHud {
     this.help.className = 'flight-help';
     this.help.hidden = true;
     this.help.innerHTML = [
-      '<b>W / S</b> thrust forward and back · <b>A / D</b> sideways · <b>R / F</b> up and down',
-      '<b>Drag</b> or <b>arrows</b> to turn · <b>Q / E</b> roll · <b>Shift</b> ×10 thrust · <b>Wheel</b> engine power',
-      '<b>Z</b> flight assist (holds still when you let go) · <b>X</b> warp drive, then <b>W / S</b> faster and slower',
-      'Pick a destination by name or click a label, then <b>T</b> to turn toward it, <b>X</b> to warp there or <b>G</b> to jump straight there',
-      '<b>Esc</b> leaves the ship',
+      '<b>Pick a destination</b> by name or click a label, then <b>X</b> to fly there (<b>G</b> jumps there instantly)',
+      '<b>X</b> with no destination: warp straight ahead · <b>W / S</b> faster and slower while warping · <b>X</b> again stops',
+      '<b>W / S</b> thrust forward and back · <b>A / D</b> sideways · <b>R / F</b> up and down · <b>Shift</b> ×30 thrust',
+      '<b>Drag</b> or <b>arrows</b> to turn · <b>Q / E</b> roll · <b>Wheel</b> engine power · <b>T</b> turn toward the destination',
+      '<b>Z</b> flight assist (holds still when you let go) · <b>Esc</b> leaves the ship',
     ].join('<br>');
     helpButton.addEventListener('click', () => { this.help.hidden = !this.help.hidden; });
     this.el.append(this.lines, helpButton, this.help);

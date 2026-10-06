@@ -198,7 +198,7 @@ describe('Flight: warp', () => {
     }
     expect(dropped).toBe(301);
     expect(ship.ref).toBe(301);
-    expect(seconds).toBeLessThan(20);
+    expect(seconds).toBeLessThan(10);
     const altitude = len(ship.rel) - 1737.4;
     expect(altitude).toBeGreaterThan(0.9 * 1737.4);
     expect(altitude).toBeLessThan(1737.4);
@@ -216,12 +216,12 @@ describe('Flight: warp', () => {
     expect(ship.engageWarp(world, T0, limiters(T0), true)).toBeUndefined();
   });
 
-  it('reaches light years per second once clear of the Sun', () => {
+  it('reaches light years per second within seconds once clear of the Sun', () => {
     const world = solarWorld();
     const ship = new Ship(10, [0, 2e10, 0]); // 130 AU above the ecliptic
     ship.look([0, 1, 0], [1, 0, 0]);
     ship.engageWarp(world, T0, limiters(T0), true);
-    for (let i = 0; i < 60 * 30; i++) ship.step(world, T0, 0, 1 / 60, IDLE, limiters(T0));
+    for (let i = 0; i < 60 * 8; i++) ship.step(world, T0, 0, 1 / 60, IDLE, limiters(T0));
     expect(ship.warp.speed / 9.4607e12).toBeGreaterThan(1);
   });
 });
