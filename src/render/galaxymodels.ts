@@ -45,6 +45,7 @@ uniform float uZ0;
 uniform float uZd;
 uniform float uTau0;
 uniform float uHd;
+uniform float uZy;
 uniform float uDh;
 uniform vec2 uTexels;
 uniform vec4 uBulge;      // rho0, re, n, q0
@@ -93,7 +94,7 @@ void main() {
     // the disc, the detail one pixel shows.
     vec3 p = o + d * t;
     float pix = max(t, 1e-6) * uPixelAngle;
-    float zs = uDisc > 0.5 ? 0.3 * max(abs(p.z), uZd) / dz : 1e9;
+    float zs = uDisc > 0.5 ? 0.3 * max(abs(p.z), min(uZd, uZy)) / dz : 1e9;
     float xs = uDisc > 0.5 && abs(p.z) < 3.0 * uZ0 ? 1.5 * max(pix, texel) / dxy : 1e9;
     float m = length(vec3(p.xy, p.z / q0));
     float bs = 0.3 * max(m, 0.03 * re);
@@ -111,7 +112,7 @@ void main() {
       vec3 face = textureLod(uFace, uv, lod).rgb;
       // Knots and fine structure in the thin layer, the smooth light in the thick one.
       float young = textureLod(uDust, uv, lod).g;
-      j += face * face * uLight * ((1.0 - young) * sech2(q.z / uZ0) / (2.0 * uZ0) + young * sech2(q.z / uZd) / (2.0 * uZd));
+      j += face * face * uLight * ((1.0 - young) * sech2(q.z / uZ0) / (2.0 * uZ0) + young * sech2(q.z / uZy) / (2.0 * uZy));
       float lane = textureLod(uDust, uv, max(lod - 1.0, 0.0)).r;
       float rr = length(q.xy);
       float tau = lane * lane * uTauMax + uTau0 * exp(-rr / uHd) * (uDh > 0.0 ? 1.0 - exp(-rr * rr / (uDh * uDh)) : 1.0);
@@ -182,6 +183,7 @@ export class GalaxyModelLayer {
       uZd: { value: spec.zd ?? 1 },
       uTau0: { value: spec.tau0 ?? 0 },
       uHd: { value: spec.hd ?? 1 },
+      uZy: { value: spec.zy ?? spec.zd ?? 1 },
       uDh: { value: spec.dh ?? 0 },
       uTexels: { value: new THREE.Vector2(...(spec.size ?? [1, 1])) },
       uBulge: { value: new THREE.Vector4(b.rho0, b.re, b.n, b.q0) },

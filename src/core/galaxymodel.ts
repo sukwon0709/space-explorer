@@ -35,9 +35,10 @@ export interface GalaxyModelSpec {
     b: number;
     rho0: number;
   };
-  /** Disc: sech^2 scale heights of the stars and the dust (kpc). */
+  /** Disc: sech^2 scale heights of the stars, the dust and the thin layer (kpc; zy is zd if absent). */
   z0?: number;
   zd?: number;
+  zy?: number;
   /** Smooth dust: face-on central optical depth (V) and scale length (kpc). */
   tau0?: number;
   hd?: number;
@@ -125,7 +126,8 @@ export function modelDensity(spec: GalaxyModelSpec, maps: FaceMaps | undefined, 
     const z0 = spec.z0!, zd = spec.zd!;
     const all = sample(maps.light, maps.width, maps.height, spec.R, p[0], p[1]);
     const thin = maps.young ? sample(maps.young, maps.width, maps.height, spec.R, p[0], p[1]) : 0;
-    j += ((all - thin) * sech2(p[2] / z0)) / (2 * z0) + (thin * sech2(p[2] / zd)) / (2 * zd);
+    const zy = spec.zy ?? zd;
+    j += ((all - thin) * sech2(p[2] / z0)) / (2 * z0) + (thin * sech2(p[2] / zy)) / (2 * zy);
     const r = Math.hypot(p[0], p[1]);
     const hole = spec.dh ? 1 - Math.exp(-((r / spec.dh) ** 2)) : 1;
     const tau = sample(maps.tau, maps.width, maps.height, spec.R, p[0], p[1]) + spec.tau0! * Math.exp(-r / spec.hd!) * hole;

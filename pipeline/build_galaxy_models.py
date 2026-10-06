@@ -72,12 +72,17 @@ SHOWCASE = {"Whirlpool Galaxy", "Pinwheel Galaxy", "Bode's Galaxy", "Sombrero Ga
 # subtracted (its tidal light stays with the partner) and drawn as its own model at the
 # partner's distance.
 COMPANIONS = {"Whirlpool Galaxy": ["NGC 5195"]}
-# Bulges whose cores the photographic plates saturate: effective radius (kpc, at the
-# catalogue distance) and Sersic index from deeper photometry. M31: Courteau et al. 2011.
-PRIORS = {"Andromeda Galaxy": (1.0, 2.2)}
+# Bulges the image can't measure on its own (a saturated core, or a bulge that dominates
+# the light): effective radius (kpc, at the catalogue distance) and Sersic index from
+# deeper photometry. M31: Courteau et al. 2011;
+# M104 and NGC 4565: Kormendy and Ho 2013, Kormendy and Barentine 2010.
+PRIORS = {"Andromeda Galaxy": (1.0, 2.2), "Sombrero Galaxy": (2.3, 4.0), "Needle Galaxy": (1.0, 1.5)}
+# Where the catalogue's axis ratio is the bulge's outline, not the disc's: the disc's own
+# (M104 is 84 degrees from face-on, its dust lane shows).
+GEOMETRY = {"Sombrero Galaxy": {"q": 0.224}}
 # Late-type and irregular galaxies (Sc and later, de Vaucouleurs RC3): no bulge to speak
 # of, only a nucleus.
-BULGELESS = {"Triangulum Galaxy", "Large Magellanic Cloud", "Small Magellanic Cloud", "NGC 300", "NGC 55", "NGC 2403",
+BULGELESS = {"Triangulum Galaxy", "Southern Pinwheel Galaxy", "Large Magellanic Cloud", "Small Magellanic Cloud", "NGC 300", "NGC 55", "NGC 2403",
              "NGC 7793", "NGC 247", "Barnard's Galaxy", "NGC 4449", "IC 342", "NGC 6946", "M74", "Pinwheel Galaxy", "Whale Galaxy",
              "M108", "M99", "M61", "NGC 2997", "Antennae Galaxies", "Cigar Galaxy", "NGC 4945", "Sculptor Galaxy"}
 # Where the catalogue's position is not the galaxy's nucleus (J2000, NED).
@@ -268,10 +273,10 @@ def fit_2d(lum: np.ndarray, c: tuple, major: np.ndarray, minor: np.ndarray, q: f
     b = xx * minor[0] + yy * minor[1]
     # Saturated pixels only say the light is at least this much: the bulge's, toward the
     # minor axis (along the major axis the inner disc adds its own).
-    low = ~keep & (np.hypot(a, b / max(q, 0.15)) < 0.2 * r25_px) & (np.abs(a) < np.abs(b))
+    low = ~keep & (np.hypot(a, b / max(q, 0.06)) < 0.2 * r25_px) & (np.abs(a) < np.abs(b))
     low_y = data[low]
-    low_rd = np.hypot(a, b / max(q, 0.15))[low]
-    rd = np.hypot(a, b / max(q, 0.15))[keep]
+    low_rd = np.hypot(a, b / max(q, 0.06))[low]
+    rd = np.hypot(a, b / max(q, 0.06))[keep]
     # The bulge's own flattening on the sky: from round down to the disc's (an intrinsic
     # axis ratio seen at this inclination).
     qbs = sorted({round(float(v), 3) for v in np.linspace(max(qb, q), 1.0, 6)} | {round(qb, 3)})
@@ -280,11 +285,15 @@ def fit_2d(lum: np.ndarray, c: tuple, major: np.ndarray, minor: np.ndarray, q: f
     w = 1 / (0.1 * np.abs(y) + 2 * noise / f)
     hs = np.geomspace(0.5 * h_cat, 1.6 * h_cat, 12)
     ns = (prior[1],) if prior else (1, 1.5, 2, 2.5, 3, 4)
+    # An exponential disc; seen edge-on, summed along the line of sight: (x/h) K1(x/h).
+    edge = q <= 0.06
+    shape = (lambda r, h: np.where(r > 0, (np.maximum(r, 1e-9) / h) * special.k1(np.maximum(r, 1e-9) / h), 1.0)) if edge \
+        else (lambda r, h: np.exp(-r / h))
 
     def disc_fit(sel):
         best = (np.inf, None)
         for h in hs:
-            A = np.stack([np.exp(-rd[sel] / h) * w[sel], w[sel]], axis=1)
+            A = np.stack([shape(rd[sel], h) * w[sel], w[sel]], axis=1)
             coef, *_ = np.linalg.lstsq(A, y[sel] * w[sel], rcond=None)
             coef[0] = max(coef[0], 0)
             chi = np.sum((A @ coef - y[sel] * w[sel]) ** 2)
@@ -295,18 +304,33 @@ def fit_2d(lum: np.ndarray, c: tuple, major: np.ndarray, minor: np.ndarray, q: f
     I0, h, sky = disc_fit(np.ones_like(y, bool))
     if late and not prior:
         return I0, h, 0.0, 1.0, 1.0, qb
+    if prior and not low.any():
+        # A bulge that dominates (its size and profile known): fit both together.
+        bn = sersic_b(prior[1])
+        best = (np.inf, None)
+        for hv in hs:
+            D = shape(rd, hv) * w
+            for qv, (rb, _) in rbs.items():
+                A = np.stack([D, np.exp(-bn * (rb / prior[0]) ** (1 / prior[1])) * w, w], axis=1)
+                coef, *_ = np.linalg.lstsq(A, y * w, rcond=None)
+                coef[:2] = np.maximum(coef[:2], 0)
+                chi = np.sum((A @ coef - y * w) ** 2)
+                if chi < best[0]:
+                    best = (chi, (coef[0], hv, coef[1], prior[0], prior[1], qv))
+        return best[1]
     # The disc from outside the bulge, carried in; the bulge is what the middle holds above it.
     rin = 0.2 * r25_px
-    outer = rd > rin
+    # Outside both the disc's and a bulge's ellipse (above an inclined disc the bulge rules).
+    outer = (rd > rin) & (rbs[round(qb, 3)][0] > rin)
     if outer.sum() > 50:
         I0, h, sky = disc_fit(outer)
-    resid = y - I0 * np.exp(-rd / h) - sky
+    resid = y - I0 * shape(rd, h) - sky
     inner = ~outer
-    low_resid = low_y - I0 * np.exp(-low_rd / h) - sky
+    low_resid = low_y - I0 * shape(low_rd, h) - sky
     low_w = 1 / (0.1 * np.abs(low_y) + 2 * noise / f)
     chi0 = np.sum((resid * w)[inner] ** 2) + np.sum((np.maximum(low_resid, 0) * low_w) ** 2)
     best = (np.inf, None)
-    res = [prior[0]] if prior else np.geomspace(max(0.7, f / 2), 0.45 * min(h, h_cat), 16)
+    res = [prior[0]] if prior else np.geomspace(max(0.7, f / 2), 0.25 * r25_px, 20)
     if low.any() and not prior:
         # A saturated core hides the bulge's cusp, so only bounds it from below: keep to
         # the shallower profiles.
@@ -342,6 +366,10 @@ def process(job: dict, geo: dict, cache: str, out_dir: str, bright: np.ndarray, 
     pix = fov / w * 3600  # arcsec per pixel
     # Foreground stars: Gaia to a depth that shows at this scale, field split into cones.
     glim = min(19.0, 19.5 - 3.75 * math.log10(max(pix, 1.0)))
+    if fov > 6:
+        # The Magellanic Clouds: their own stars crowd Gaia's servers past their time limit,
+        # and at this scale fainter foreground stars are lost in the clouds' light.
+        glim = min(glim, 13.0)
     radius = fov * 0.72
     tile = 0.5 if fov < 6 else 1.0
     stars = []
@@ -383,7 +411,7 @@ def process(job: dict, geo: dict, cache: str, out_dir: str, bright: np.ndarray, 
     lum = luminance(img)
 
     # Geometry: centre (the light's peak near the catalogue position), axes on the image.
-    pa, q, spheroid = geo["pa"], geo["q"], geo["spheroid"]
+    pa, q, spheroid = geo["pa"], GEOMETRY.get(name, {}).get("q", geo["q"]), geo["spheroid"]
     cosi = 0.0 if spheroid else math.sqrt(min(1.0, max(0.0, (q * q - 0.04) / 0.96)))
     kpc_per_px = geo["dist"] * 1e3 * math.radians(pix / 3600)
     r25_px = geo["r25"] * 3600 / pix
@@ -412,13 +440,19 @@ def process(job: dict, geo: dict, cache: str, out_dir: str, bright: np.ndarray, 
         # Plates saturate gradually: leave out a saturated core out to 1.5 times its radius.
         core = radii[np.argmin(sat)] if not sat.all() else radii[-1]
         ok &= radii > 1.5 * core
+    if ok.sum() < 6:
+        # Saturated nearly throughout: the plate's shape is all there is.
+        ok = np.isfinite(prof) & (prof > 2 * noise)
     prior = (PRIORS[name][0] / kpc_per_px, PRIORS[name][1]) if name in PRIORS else None
     q0 = max(q, 0.1) if spheroid else BULGE_Q0
     qb = q0 if spheroid else math.sqrt(cosi ** 2 + q0 ** 2 * (1 - cosi ** 2))
     if spheroid:
         I_d, h_px, I_b, re_px, sn = fit_profile(radii[ok], prof[ok], noise, spheroid, rmax, prior, geo["h"] / kpc_per_px)
     else:
-        I_d, h_px, I_b, re_px, sn, qb = fit_2d(lum, (cx, cy), major, minor, q, qb, r25_px, geo["h"] / kpc_per_px, noise,
+        # Edge-on, the catalogue's axis ratio is the bulge's and the disc's outline together;
+        # the disc itself is far thinner.
+        q_disc = 0.06 if cosi < EDGE_ON else q
+        I_d, h_px, I_b, re_px, sn, qb = fit_2d(lum, (cx, cy), major, minor, q_disc, qb, r25_px, geo["h"] / kpc_per_px, noise,
                                            ndimage.binary_dilation(saturated, iterations=2), name in BULGELESS, prior)
         # The intrinsic axis ratio that looks this flat at this inclination.
         q0 = math.sqrt(max(qb ** 2 - cosi ** 2, 0.0) / max(1 - cosi ** 2, 1e-6)) if cosi < 0.999 else BULGE_Q0
@@ -437,7 +471,7 @@ def process(job: dict, geo: dict, cache: str, out_dir: str, bright: np.ndarray, 
     unit = 2 * math.pi * qb * re_px ** 2 * sn * bn ** (-2 * sn) * special.gamma(2 * sn)
     Lb = I_b * unit
     disc_img = np.clip(img - bulge_map[..., None] * colour, 0, None)
-    disc_model = I_d * np.exp(-np.hypot(a_, b_ / max(q, 0.15)) / h_px)
+    disc_model = I_d * np.exp(-np.hypot(a_, b_ / max(q if cosi >= EDGE_ON else 0.06, 0.06)) / h_px)
     lab, _ = ndimage.label(ndimage.binary_dilation(saturated, iterations=3))
     core = (lab == lab[int(cy), int(cx)]) & (lab > 0)
     # The sky as it is: where the plate is saturated, the bulge and disc that were fitted.
@@ -522,28 +556,52 @@ def process(job: dict, geo: dict, cache: str, out_dir: str, bright: np.ndarray, 
     tau_smooth = DUST_TAU0 * np.exp(-rr / (DUST_SCALE * h_kpc))
     if hole > 0:
         tau_smooth *= 1 - np.exp(-(rr / hole) ** 2)
+    thin_z, thin_frac = None, None
     if edge_on:
         # The face can't be seen: a smooth exponential disc with the disc's light and colour.
         dl = disc_img.sum(axis=(0, 1))
         face = np.exp(-rr / h_kpc)[..., None] * (dl / luminance(dl))
         tau_lane = np.zeros_like(rr)
         disc_light = float(luminance(dl))
-        face *= disc_light * 1.6 / (luminance(face).sum() * (2 * R / nx) * (2 * R / ny))
+        face *= disc_light / (luminance(face).sum() * (2 * R / nx) * (2 * R / ny))
         # Its thickness from the light's spread across the plane, away from the bulge.
+        # Measured from the disc's own ridge at each place along it (the catalogue's position
+        # angle is a degree or two off, which would smear the profile).
         zprof = []
+        sm = ndimage.gaussian_filter(luminance(disc_img), 1)
+        off = np.linspace(0, 0.15 * r25_px, 40)
+        span = np.linspace(-0.15 * r25_px, 0.15 * r25_px, 121)
         for sgn in (1, -1):
-            off = np.linspace(0, 0.15 * r25_px, 40)
-            for along in (0.5, 1.0):
-                c0 = np.array([cx, cy]) + sgn * along * h_px * major
-                zprof.append(ndimage.map_coordinates(ndimage.gaussian_filter(luminance(disc_img), 1),
-                                                     [c0[1] + off * minor[1], c0[0] + off * minor[0]], order=1)
-                             + ndimage.map_coordinates(ndimage.gaussian_filter(luminance(disc_img), 1),
-                                                       [c0[1] - off * minor[1], c0[0] - off * minor[0]], order=1))
+            for along in np.linspace(0.3, 1.2, 10) * min(h_px, 0.4 * r25_px):
+                c0 = np.array([cx, cy]) + sgn * along * major
+                cut = ndimage.map_coordinates(sm, [c0[1] + span * minor[1], c0[0] + span * minor[0]], order=1)
+                if cut.max() <= 0:
+                    continue
+                top = span[np.argmax(cut)]
+                c1 = c0 + top * minor
+                zprof.append((ndimage.map_coordinates(sm, [c1[1] + off * minor[1], c1[0] + off * minor[0]], order=1)
+                              + ndimage.map_coordinates(sm, [c1[1] - off * minor[1], c1[0] - off * minor[0]], order=1))
+                             / max(cut.max(), 1e-30))
         zp = np.mean(zprof, axis=0)
-        okz = (zp > 0.05 * zp.max()) & (zp < 0.5 * zp.max())
-        if okz.sum() > 3:
-            slope = np.polyfit(off[okz], np.log(zp[okz]), 1)[0]
-            z0 = min(max(-2 / slope * kpc_per_px, 0.08 * h_kpc), 0.4 * h_kpc)
+        # A thin disc and a thick one (each sech^2), fitted to the profile across the plane.
+        zk = off * kpc_per_px
+        ok = zp > 0.01 * zp.max()
+        sech2 = lambda x: 1 / np.cosh(np.minimum(x, 40)) ** 2
+        best = (np.inf, None)
+        for z1 in np.geomspace(0.03 * h_kpc, 0.3 * h_kpc, 24):
+            for z2 in np.geomspace(z1 * 1.5, 0.5 * h_kpc, 16):
+                A = np.stack([sech2(zk / z1), sech2(zk / z2)], axis=1)[ok]
+                wz = 1 / zp[ok]  # relative errors: the faint wings count
+                coef, *_ = np.linalg.lstsq(A * wz[:, None], zp[ok] * wz, rcond=None)
+                if (coef < 0).any():
+                    continue
+                chi = np.sum((A @ coef - zp[ok]) ** 2 * wz ** 2)
+                if chi < best[0]:
+                    best = (chi, (z1, z2, coef))
+        if best[1] is not None:
+            z1, z2, (a1, a2) = best[1]
+            z0, thin_z = float(z2), float(z1)
+            thin_frac = float(a1 * z1 / (a1 * z1 + a2 * z2))
     else:
         sample = lambda a: ndimage.map_coordinates(a, [rows, cols], order=1, mode="constant", cval=0)
         face = np.stack([sample(disc_img[..., c]) for c in range(3)], axis=-1) * cosi / kpc_per_px ** 2
@@ -558,17 +616,99 @@ def process(job: dict, geo: dict, cache: str, out_dir: str, bright: np.ndarray, 
     win = np.clip((0.95 * R - rr) / (0.2 * R), 0, 1) ** 2
     face *= win[..., None]
     tau_lane = tau_lane * win
+    # What Earth sees is after the galaxy's own dust: the light that is put in is that much
+    # more, worked out along the same sight lines the renderer takes.
+    view = view_dir(cosi, near)
+    zd = DUST_Z0 * (thin_z or z0)
+    H = max(5 * z0, (6 if sn >= 3 else 4) * re_px * kpc_per_px * q0, 0.02 * R)
+    disc_seen = luminance(disc_img).sum()
+    face0 = face
+
+    def corrected(tau0: float, kb: float = 1.0):
+        # kb: the bulge's share of the image's light scaled by this, the disc's the rest.
+        dust_map = tau_lane + tau_smooth * (tau0 / DUST_TAU0)
+        out = face0
+        disc_model = luminance(face0).sum() * (2 * R / face0.shape[1]) * (2 * R / face0.shape[0])
+        if disc_model > 0:
+            f_d = seen_fraction(*disc_points(luminance(face0), R, z0), dust_map, R, H, zd, view)
+            if thin_z:
+                f_d = (1 - thin_frac) * f_d + thin_frac * seen_fraction(*disc_points(luminance(face0), R, thin_z), dust_map,
+                                                                        R, H, zd, view)
+            out = face0 * (disc_seen - (kb - 1) * Lb) / (disc_model * f_d)
+        lb = kb * Lb / seen_fraction(*bulge_points(re_px * kpc_per_px, sn, q0), dust_map, R, H, zd, view) if Lb > 0 else 0.0
+        return out, lb, dust_map
+
+    tau0, kb = DUST_TAU0, 1.0
+    if edge_on:
+        # Neither the lanes nor the bulge can be told apart from the disc face-on: the smooth
+        # dust's depth and the bulge's share are those whose picture from Earth looks most
+        # like the image.
+        best = (-np.inf, tau0, kb)
+        for k_ in ((1.0, 1.5, 2.0, 3.0, 4.0, 6.0) if Lb > 0 else (1.0,)):
+            if (k_ - 1) * Lb >= 0.8 * disc_seen:
+                continue
+            for t0 in (0.0, 0.05, 0.1, 0.2, 0.35, 0.7):
+                f_, lb, dm = corrected(t0, k_)
+                c = edge_on_match(sky_true, (cx, cy), major, minor, kpc_per_px, R, H, sky_axes(cosi, near), f_, dm,
+                                  z0, thin_z, thin_frac, zd, lb, re_px * kpc_per_px, sn, q0)
+                if c > best[0]:
+                    best = (c, t0, k_)
+        _, tau0, kb = best
+        print(f"  edge-on: smooth dust tau0 = {tau0}, bulge x{kb} (match {best[0]:.3f})", flush=True)
+    face, Lb_int, _ = corrected(tau0, kb)
     if Lb > 0:
-        # The bulge seen from Earth is dimmed where it lies behind the disc's dust: its own
-        # light is that much more.
-        entry["bulge"]["L"] = Lb / bulge_seen(tau_lane + tau_smooth, R, re_px * kpc_per_px, sn, q0, DUST_Z0 * z0,
-                                              max(cosi, 0.25), near) / total
-    entry.update({"z0": round(z0, 4), "zd": round(DUST_Z0 * z0, 4), "tau0": DUST_TAU0, "hd": round(DUST_SCALE * h_kpc, 4),
+        entry["bulge"]["L"] = Lb_int / total
+    entry.update({"z0": round(z0, 4), "zd": round(zd, 4), "tau0": tau0, "hd": round(DUST_SCALE * h_kpc, 4),
                   "dh": round(hole, 4),
+                  **({"zy": round(thin_z, 4)} if thin_z else {}),
                   "h": round(h_kpc, 4), "near": near, "edgeOn": bool(edge_on), "cosi": round(cosi, 4),
-                  "H": round(max(5 * z0, (6 if sn >= 3 else 4) * re_px * kpc_per_px * q0, 0.02 * R), 4)})
+                  "H": round(H, 4)})
     fixture = {"sky": sky_true, "face": luminance(face), "tau": tau_lane, "centre": [cx - cx0, cy - cy0]}
-    return (*finish(entry, fixture, kpc_per_px, n, face, tau_lane, out_dir, s), extra)
+    return (*finish(entry, fixture, kpc_per_px, n, face, tau_lane, out_dir, s, thin_frac), extra)
+
+
+def edge_on_match(sky, c, major, minor, kpc_per_px, R, H, axes, face, dust, z0, zy, frac, zd, Lb, re, sn, q0) -> float:
+    """How much a model, ray-traced toward Earth on a coarse grid, looks like the image:
+    correlation of square-root brightness (as the gate test measures it)."""
+    n = 48
+    half = 0.9 * R
+    g = (np.arange(n) + 0.5) / n * 2 * half - half
+    A, B = np.meshgrid(g, g)
+    px = 2 * half / n / kpc_per_px
+    sm = ndimage.gaussian_filter(sky, max(px / 2.355, 0.5))
+    obs = ndimage.map_coordinates(sm, [c[1] + (A * major[1] + B * minor[1]) / kpc_per_px,
+                                       c[0] + (A * major[0] + B * minor[0]) / kpc_per_px], order=1)
+    # In view_dir's sky frame the major axis is north (y), the minor axis east (x), z away
+    # from Earth; the same vectors in the model's frame:
+    E, N, view = (np.array([a[k] for a in axes]) for k in range(3))
+    p0 = B.ravel()[:, None] * E + A.ravel()[:, None] * N - 3 * R * view
+    steps = 200
+    t = np.linspace(0, 6 * R, steps + 1)
+    dt = t[1] - t[0]
+    hh, ww = face.shape[:2]
+    lum = luminance(face)
+    bn = sersic_b(sn)
+    p = 1 - 0.6097 / sn + 0.05463 / sn ** 2
+    rho0 = Lb / (4 * math.pi * q0 * re ** 3 * sn * bn ** (-sn * (3 - p)) * special.gamma(sn * (3 - p))) if Lb > 0 else 0.0
+    light = np.zeros(len(p0))
+    trans = np.ones(len(p0))
+    sech2 = lambda x: 1 / np.cosh(np.minimum(np.abs(x), 40)) ** 2
+    for k in range(steps):
+        q = p0 + (t[k] + dt / 2) * view
+        inside = (np.abs(q[:, 0]) < R) & (np.abs(q[:, 1]) < R) & (np.abs(q[:, 2]) < H)
+        u = np.clip((q[:, 0] / R * 0.5 + 0.5) * ww - 0.5, 0, ww - 1)
+        v = np.clip((-q[:, 1] / R * 0.5 + 0.5) * hh - 0.5, 0, hh - 1)
+        f = ndimage.map_coordinates(lum, [v, u], order=1) * inside
+        tau = ndimage.map_coordinates(dust, [v, u], order=1) * inside
+        j = f * ((1 - (frac or 0)) * sech2(q[:, 2] / z0) / (2 * z0) + ((frac or 0) * sech2(q[:, 2] / zy) / (2 * zy) if zy else 0))
+        if rho0 > 0:
+            m = np.maximum(np.sqrt(q[:, 0] ** 2 + q[:, 1] ** 2 + (q[:, 2] / q0) ** 2) / re, 1e-3)
+            j = j + rho0 * m ** -p * np.exp(-bn * m ** (1 / sn)) * inside
+        a = tau * sech2(q[:, 2] / zd) / (2 * zd) * dt
+        light += trans * j * dt * np.where(a > 1e-4, (1 - np.exp(-a)) / np.maximum(a, 1e-12), 1.0)
+        trans *= np.exp(-a)
+    sa, sb = np.sqrt(np.clip(obs.ravel(), 0, None)), np.sqrt(np.clip(light, 0, None))
+    return float(np.corrcoef(sa, sb)[0, 1])
 
 
 def inpaint(img: np.ndarray, hole: np.ndarray, size: float) -> np.ndarray:
@@ -595,38 +735,70 @@ def inpaint(img: np.ndarray, hole: np.ndarray, size: float) -> np.ndarray:
     return out
 
 
-def bulge_seen(tau: np.ndarray, R: float, re: float, sn: float, q0: float, zd: float, cosi: float, near: int) -> float:
-    """Fraction of a bulge's light that gets through the disc's dust (face-on optical depth
-    `tau` over [-R, R]^2, a sech^2 layer of scale height zd) on its way to Earth. The
-    model's axes are core/galaxymodel.ts modelAxes'; each point sees the dust where its
-    sight line crosses the disc."""
-    sini = math.sqrt(1 - cosi * cosi)
-    depth = -1 if near == 1 else 1
-    # Sky frame (east, north, away from Earth); the result does not depend on the PA.
-    sv = np.array([0.0, 0.0, 1.0])
+def sky_axes(cosi: float, near: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """The model's axes (core/galaxymodel.ts modelAxes) in a sky frame with the major axis
+    north (y), the minor axis east (x) and z away from Earth."""
+    sini = math.sqrt(max(1 - cosi * cosi, 0.0))
     X = np.array([0.0, 1.0, 0.0])
-    Y = cosi * np.array([1.0, 0.0, 0.0]) + depth * sini * sv
-    Z = np.cross(X, Y)
-    d = np.array([sv @ X, sv @ Y, sv @ Z])  # away from Earth, model frame
+    Y = cosi * np.array([1.0, 0.0, 0.0]) + (-1 if near == 1 else 1) * sini * np.array([0.0, 0.0, 1.0])
+    return X, Y, np.cross(X, Y)
+
+
+def view_dir(cosi: float, near: int) -> np.ndarray:
+    """The direction away from Earth in the model's frame; it does not depend on the
+    position angle."""
+    return np.array([a[2] for a in sky_axes(cosi, near)])
+
+
+def seen_fraction(p: np.ndarray, w: np.ndarray, tau: np.ndarray, R: float, H: float, zd: float, d: np.ndarray) -> float:
+    """Fraction of the light of sources at points `p` (N x 3, model frame, kpc) with weights
+    `w` that gets through the dust on its way to Earth: optical depth `tau` face-on over
+    [-R, R]^2 in a sech^2 layer of scale height zd, integrated along each sight line out of
+    the box, as the renderer does."""
+    hgt, wd = tau.shape
+    toward = -d
+    # Where each sight line leaves the box.
+    with np.errstate(divide="ignore"):
+        lim = np.stack([np.where(toward[k] > 0, (b - p[:, k]) / toward[k], np.where(toward[k] < 0, (-b - p[:, k]) / toward[k], np.inf))
+                        for k, b in enumerate((R, R, H))], axis=1)
+    t_exit = np.maximum(lim.min(axis=1), 0)
+    steps = 160
+    col = np.zeros(len(p))
+    for k in range(steps):
+        t = (k + 0.5) / steps * t_exit
+        q = p + t[:, None] * toward
+        u = np.clip((q[:, 0] / R * 0.5 + 0.5) * wd - 0.5, 0, wd - 1)
+        v = np.clip((-q[:, 1] / R * 0.5 + 0.5) * hgt - 0.5, 0, hgt - 1)
+        tt = ndimage.map_coordinates(tau, [v, u], order=1)
+        c = np.cosh(np.minimum(np.abs(q[:, 2] / zd), 40))
+        col += tt / (c * c) / (2 * zd) * t_exit / steps
+    return float(np.sum(w * np.exp(-col)) / np.sum(w))
+
+
+def bulge_points(re: float, sn: float, q0: float) -> tuple[np.ndarray, np.ndarray]:
+    """A Prugniel-Simien bulge as weighted points (kpc)."""
     bn = sersic_b(sn)
     p = 1 - 0.6097 / sn + 0.05463 / sn ** 2
-    m = np.geomspace(1e-3, 12, 160)
-    mu = np.linspace(-1, 1, 41)[:-1] + 1 / 40
-    ph = np.linspace(0, 2 * np.pi, 24, endpoint=False)
+    m = np.geomspace(1e-3, 12, 60)
+    mu = np.linspace(-1, 1, 21)[:-1] + 1 / 20
+    ph = np.linspace(0, 2 * np.pi, 12, endpoint=False)
     M, MU, PH = np.meshgrid(m, mu, ph, indexing="ij")
     w = M ** -p * np.exp(-bn * M ** (1 / sn)) * M ** 3  # rho m^2 dm, dm ~ m on a log grid
     st = np.sqrt(1 - MU ** 2)
-    x, y, z = M * re * st * np.cos(PH), M * re * st * np.sin(PH), M * re * q0 * MU
-    # Toward Earth (-d) the sight line crosses the plane at t = z / d_z.
-    t = z / d[2]
-    xc, yc = x - t * d[0], y - t * d[1]
-    h, wd = tau.shape
-    u = np.clip((xc / R * 0.5 + 0.5) * wd - 0.5, 0, wd - 1)
-    v = np.clip((-yc / R * 0.5 + 0.5) * h - 0.5, 0, h - 1)
-    col = ndimage.map_coordinates(tau, [v.ravel(), u.ravel()], order=1).reshape(x.shape)
-    col = np.where((np.abs(xc) < R) & (np.abs(yc) < R), col, 0.0)
-    front = 0.5 * (1 + np.tanh(z * np.sign(d[2]) / zd))
-    return float(np.sum(w * np.exp(-col * front / abs(d[2]))) / np.sum(w))
+    pts = np.stack([M * re * st * np.cos(PH), M * re * st * np.sin(PH), M * re * q0 * MU], axis=-1)
+    return pts.reshape(-1, 3), w.ravel()
+
+
+def disc_points(light: np.ndarray, R: float, z0: float, n: int = 20000) -> tuple[np.ndarray, np.ndarray]:
+    """The disc as points drawn from its face-on light, sech^2 in height."""
+    rng = np.random.default_rng(1)
+    hgt, wd = light.shape
+    prob = np.clip(light, 0, None).ravel()
+    idx = rng.choice(prob.size, n, p=prob / prob.sum())
+    x = ((idx % wd + rng.random(n)) / wd * 2 - 1) * R
+    y = -((idx // wd + rng.random(n)) / hgt * 2 - 1) * R
+    z = z0 * np.arctanh(np.clip(2 * rng.random(n) - 1, -0.999999, 0.999999))
+    return np.stack([x, y, z], axis=1), np.ones(n)
 
 
 def fit_companion(img: np.ndarray, name: str, geo: dict, job: dict, pix: float, noise: float, saturated: np.ndarray):
@@ -686,7 +858,7 @@ def fit_companion(img: np.ndarray, name: str, geo: dict, job: dict, pix: float, 
     return rest, entry
 
 
-def finish(entry, fixture, kpc_per_px, n, face=None, tau=None, out_dir=None, s=None):
+def finish(entry, fixture, kpc_per_px, n, face=None, tau=None, out_dir=None, s=None, thin_frac=None):
     """Write the maps; light in units of the image's total."""
     total = entry.pop("total")
     b = entry["bulge"]
@@ -713,6 +885,9 @@ def finish(entry, fixture, kpc_per_px, n, face=None, tau=None, out_dir=None, s=N
         px = 2 * entry["R"] / face.shape[1]
         young = np.clip(1 - blur(lum_f, max(1.0, 0.4 / px)) / np.maximum(lum_f, 1e-30), 0, 1)
         young[lum_f <= 0] = 0
+        if thin_frac is not None:
+            # Edge-on: the thin disc's share, measured across the plane.
+            young[:] = thin_frac
         fixture["young"] = young
         tmax = float(max(tau.max(), 1e-3))
         shrink = (lambda a: a) if tau.shape[1] <= 2048 else (lambda a: ndimage.zoom(a, 2048 / tau.shape[1], order=1))

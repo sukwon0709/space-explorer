@@ -49,11 +49,18 @@ function render(spec: GalaxyModelSpec, fx: Fixture): number[][] {
   const dir = local(s);
   const n = fx.sky.length;
   const c0 = n / 2 - 0.5;
+  // Each pixel is the mean of 3 x 3 rays, as the image's pixels average the sky (a thin
+  // dust lane seen edge-on covers only part of one).
+  const sub = [-1 / 3, 0, 1 / 3];
   return fx.sky.map((row, r) => row.map((_, c) => {
-    // East is left, north up; the grid's centre is the cutout's, the model's the nucleus.
-    const e = -(c - c0 - fx.centre[0]) * fx.kpcPerPx, nn = -(r - c0 - fx.centre[1]) * fx.kpcPerPx;
-    const p = local([0, 1, 2].map((k) => e * east[k] + nn * north[k] - 1e4 * s[k]) as Vec3);
-    return integrateRay(spec, maps, p, dir, 600);
+    let sum = 0;
+    for (const dr of sub) for (const dc of sub) {
+      // East is left, north up; the grid's centre is the cutout's, the model's the nucleus.
+      const e = -(c + dc - c0 - fx.centre[0]) * fx.kpcPerPx, nn = -(r + dr - c0 - fx.centre[1]) * fx.kpcPerPx;
+      const p = local([0, 1, 2].map((k) => e * east[k] + nn * north[k] - 1e4 * s[k]) as Vec3);
+      sum += integrateRay(spec, maps, p, dir, 600);
+    }
+    return sum / 9;
   }));
 }
 
@@ -78,6 +85,6 @@ describe('3D galaxy models look like their survey images from Earth', () => {
         db += (sb[k] - mb) ** 2;
       }
       expect(num / Math.sqrt(da * db)).toBeGreaterThan(0.95);
-    });
+    }, 120_000);
   }
 });
