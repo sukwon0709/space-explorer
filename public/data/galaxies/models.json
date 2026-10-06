@@ -1,5 +1,5 @@
 {
- "source": "SDSS DR9 g, r, i and DSS2 colour via CDS hips2fits; foreground stars removed with Gaia DR3",
+ "source": "SDSS DR9 g, r, i, DSS2 colour and Pan-STARRS DR1 g, r via CDS hips2fits; foreground stars removed with Gaia DR3",
  "models": [
   {
    "name": "Whirlpool Galaxy",
@@ -72,46 +72,46 @@
   },
   {
    "name": "Andromeda Galaxy",
-   "survey": "DSS2",
+   "survey": "DSS2+PS1",
    "kind": "disc",
-   "ra": 10.686024,
-   "dec": 41.271447,
+   "ra": 10.684809,
+   "dec": 41.269622,
    "pa": 35.16,
    "q": 0.3294,
    "R": 25.117,
    "bulge": {
-    "L": 0.932908,
-    "re": 1.0,
-    "n": 2.2,
+    "L": 0.506429,
+    "re": 0.64585,
+    "n": 0.8,
     "q0": 0.6000845802828517,
     "colour": [
-     1.5732,
-     0.9064,
-     0.2396
+     1.4297,
+     0.9298,
+     0.4299
     ],
-    "p": 0.73415,
-    "b": 4.07153,
-    "rho0": 2.62561
+    "p": 0.32323,
+    "b": 1.28183,
+    "rho0": 0.496392
    },
    "z0": 0.8081,
    "zd": 0.4041,
    "tau0": 0.7,
    "hd": 5.6569,
-   "dh": 1.5,
+   "dh": 0.9688,
    "h": 4.0407,
    "near": -1,
    "edgeOn": false,
    "cosi": 0.2671,
    "H": 4.0407,
    "file": "andromeda-galaxy.jpg",
-   "light": 0.022030397932492757,
+   "light": 0.04711223565804558,
    "size": [
     4096,
     1096
    ],
-   "discL": 0.5992203882760808,
+   "discL": 1.1049164632266155,
    "dust": "andromeda-galaxy-dust.jpg",
-   "tauMax": 0.40848324699863703
+   "tauMax": 1.0020196541137265
   },
   {
    "name": "Triangulum Galaxy",

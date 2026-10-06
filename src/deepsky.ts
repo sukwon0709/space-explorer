@@ -354,7 +354,7 @@ export class DeepSky {
       lines.push(`Light travel time ${formatYears(this.cosmology.lightTravelYears(fromSun))}`);
       const model = this.modelOf.get(g.i)?.spec;
       if (model) {
-        const from = model.survey === 'SDSS' ? 'SDSS' : 'DSS2 plate';
+        const from = model.survey === 'SDSS' ? 'SDSS' : model.survey === 'DSS2+PS1' ? 'DSS2 plate and Pan-STARRS' : 'DSS2 plate';
         lines.push(model.kind === 'spheroid'
           ? `3D model from ${from} images: Sérsic n = ${model.bulge.n}`
           : `3D model from ${from} images: bulge ${Math.round((model.bulge.L / (model.bulge.L + (model.discL ?? 0))) * 100)}% of the starlight, disc tilted ${Math.round((Math.acos(model.cosi ?? 1) * 180) / Math.PI)}° to our view`);
