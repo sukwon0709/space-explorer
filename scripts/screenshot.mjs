@@ -103,6 +103,17 @@ const views = {
   'jezero-walk': `site=jezero&t=2026-10-09T16:00:00Z&walk=1`,
   'apollo11': `site=apollo11&t=2026-10-18T04:00:00Z`,
   'apollo11-walk': `site=apollo11&t=2026-10-18T04:00:00Z&walk=1`,
+  // Landing anywhere: terrain on every solid world, at times its feature is in daylight.
+  'mercury-rachmaninoff': `focus=Mercury&t=2026-12-23T00:00:00Z&lat=27.66&lon=57.37&dist=450&heading=0&tilt=35`,
+  'mercury-walk': `focus=Mercury&t=2026-12-23T00:00:00Z&lat=26.4&lon=57.37&dist=0.05&heading=0&tilt=5&walk=1`,
+  'ceres-occator': `focus=Ceres&t=2026-10-05T07:50:00Z&lat=19.82&lon=-120.67&dist=170&heading=0&tilt=40`,
+  'ceres-ahuna': `focus=Ceres&t=2026-10-05T06:02:00Z&lat=-10.48&lon=-43.8&dist=45&heading=0&tilt=22`,
+  'ceres-ahuna-walk': `focus=Ceres&t=2026-10-05T06:02:00Z&lat=-10.95&lon=-43.8&dist=0.05&heading=0&tilt=5&walk=1`,
+  'vesta-rheasilvia': `focus=Vesta&t=2026-10-05T05:25:00Z&lat=-71.95&lon=86.3&dist=420&heading=0&tilt=40`,
+  'phobos-stickney': `focus=Phobos&t=2026-10-05T08:20:00Z&lat=1&lon=-49&dist=12&heading=0&tilt=40`,
+  'io-loki': `focus=Io&t=2026-10-06T03:27:00Z&lat=13&lon=51.2&dist=700&heading=0&tilt=40`,
+  'europa-conamara': `focus=Europa&t=2026-10-05T21:30:00Z&lat=9.7&lon=87.3&dist=200&heading=0&tilt=35`,
+  'pluto-sputnik': `focus=Pluto&t=2026-10-09T12:24:00Z&lat=19.5&lon=178.7&dist=1700&heading=0&tilt=45`,
   // Star systems: stars up close, binary companions, exoplanets (looks estimated).
   'sirius-system': `focus=Sirius&t=${T}&dist=1.5e10&pitch=1.2`,
   'sirius-b': `focus=Sirius%20B&t=${T}&dist=40000`,

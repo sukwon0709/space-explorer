@@ -160,7 +160,7 @@ export class FlightHud {
       '<b>X</b> with no destination: warp straight ahead · <b>W / S</b> faster and slower while warping · <b>X</b> again stops',
       '<b>W / S</b> thrust forward and back · <b>A / D</b> sideways · <b>R / F</b> up and down · <b>Shift</b> ×30 thrust',
       '<b>Drag</b> or <b>arrows</b> to turn · <b>Q / E</b> roll · <b>Wheel</b> engine power · <b>T</b> turn toward the destination',
-      'Once landed on the Moon, Mars or Earth, <b>O</b> steps outside',
+      'Once landed on a solid surface, <b>O</b> steps outside',
       '<b>Z</b> flight assist (holds still when you let go) · <b>Esc</b> leaves the ship',
     ].join('<br>');
     this.help.innerHTML = this.shipHelp;
