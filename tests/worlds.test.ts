@@ -123,6 +123,29 @@ describe('Worlds: relief matches published measurements', () => {
     expect(uplands - inside).toBeLessThan(3.7);
   });
 
+  it('Venus: Maxwell Montes rises about 11 km above the mean planetary radius', () => {
+    // Ford and Pettengill 1992 (Magellan altimetry): mean planetary radius 6051.84 km;
+    // Maxwell Montes peaks 10.8-11.0 km above it. IAU centre 65.2 N, 3.3 E. The tiles'
+    // 9 km cells average the summit down by about half a kilometre.
+    const w = world('venus');
+    const top = peak(w, 65.2, 3.3, 300) + w.radius - 6051.84;
+    console.log(`Venus: Maxwell Montes ${top.toFixed(2)} km above the mean radius (Ford and Pettengill 1992: 10.8-11)`);
+    expect(top).toBeGreaterThan(10.0);
+    expect(top).toBeLessThan(11.5);
+  });
+
+  it('Titan: its seas lie below the equatorial ground and are liquid, flat', () => {
+    // Corlies et al. 2017: the poles are 300-500 m lower than the equator; Kraken,
+    // Ligeia and Punga Maria share a level (Hayes et al. 2017). IAU centres.
+    const w = world('titan');
+    const equator = mean(ring(w, 0, 0, 0.1, 4).concat([0, 60, 120, 180, -60, -120].map((lon) => [lon, 0] as [number, number])).map(([x, y]) => heightAt(w.body, x, y)));
+    const seas = [['Ligeia', 79.7, 112.1], ['Kraken', 68, 50], ['Punga', 85.1, 20.3]] as const;
+    const levels = seas.map(([, lat, lon]) => heightAt(w.body, lon, lat));
+    console.log(`Titan: seas at ${levels.map((h) => (h * 1000).toFixed(0)).join(', ')} m, equator ${(equator * 1000).toFixed(0)} m`);
+    for (const h of levels) expect(h).toBeLessThan(equator - 0.2);
+    expect(Math.max(...levels) - Math.min(...levels)).toBeLessThan(0.5);
+  });
+
   it('bodies without an elevation model take their IAU shape: Iapetus is 34 km flatter at the poles', () => {
     // pck00011: 745.7 x 745.7 x 712.1 km.
     const w = world('iapetus');
@@ -135,13 +158,15 @@ describe('Worlds: relief matches published measurements', () => {
 
 describe('Worlds: walking at their gravity', () => {
   const STAND: WalkInput = { move: [0, 0], run: false, jump: false };
-  it('weighs what NASA lists on Mercury, Europa, Ceres and Pluto', () => {
+  it('weighs what NASA lists on Mercury, Venus, Europa, Ceres, Titan and Pluto', () => {
     // NASA planetary fact sheets / JPL SSD, equatorial surface gravity (m/s^2).
     const cases: Array<[string, number, number, number]> = [
       ['mercury', 3.7, 0.03, 58.6462 * 86400],
       ['europa', 1.315, 0.02, 3.551181 * 86400],
       ['ceres', 0.28, 0.02, 9.074 * 3600],
       ['pluto', 0.62, 0.02, 6.387 * 86400],
+      ['venus', 8.87, 0.03, 243.0226 * 86400],
+      ['titan', 1.352, 0.02, 15.945 * 86400],
     ];
     for (const [name, nasa, tol, day] of cases) {
       const w = world(name);

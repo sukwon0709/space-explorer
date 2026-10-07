@@ -44,6 +44,8 @@ export function buildTileGeometry(
   y: number,
   n: number,
   source: { tile: HeightTile; level: number; x: number; y: number; grid: number } | null,
+  /** Computed relief to add (km) at lon/lat degrees, for a mesh of the given spacing (km). */
+  relief?: (lon: number, lat: number, spacing: number) => number,
 ): TileGeometry {
   const [west, south, east, north] = tileBounds(level, x, y);
   const count = n * n;
@@ -77,6 +79,23 @@ export function buildTileGeometry(
     }
   } else {
     minHeight = maxHeight = 0;
+  }
+  if (relief) {
+    // Liquid stays flat; land takes the computed relief.
+    const spacing = ((north - south) / (n - 1)) * DEG * shape.a;
+    minHeight = Infinity;
+    maxHeight = -Infinity;
+    for (let j = 0; j < n; j++) {
+      for (let i = 0; i < n; i++) {
+        const k = j * n + i;
+        if (wet[k] < 0.5) {
+          const [lon, lat] = lonLat(i, j);
+          heights[k] += relief(lon, lat, spacing) * (1 - 2 * wet[k]);
+        }
+        minHeight = Math.min(minHeight, heights[k]);
+        maxHeight = Math.max(maxHeight, heights[k]);
+      }
+    }
   }
 
   // Float64 surface points.

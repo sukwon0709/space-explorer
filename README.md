@@ -4,7 +4,27 @@ A real-time 3D simulator for travelling from Earth through the Solar System and 
 
 The full plan, including the roadmap, lives in the [design doc](https://claude.ai/code/artifact/c235450b-21cd-41a8-bc4b-b69ca4239c84).
 
-## Land anywhere (this code)
+## Venus and Titan (this code)
+
+**You can now land on the two worlds whose ground no camera in orbit can see.** Fly below Venus's clouds (70 km) or Titan's haze (300 km) and the planet's cloud globe gives way to terrain, a sky the colour of the clouds, and air so thick the far ground fades out. Search `Venera 13` or `Huygens` to stand where the landers did, or any of 2,289 named features (`Maxwell Montes`, `Ligeia Mare`, `Selk`).
+
+What is measured and what is computed:
+
+- **Heights are measured**: Magellan radar altimetry for Venus (gaps in Magellan's strips are filled from the ground around them), and Cassini's radar topography for Titan as interpolated by Corlies et al. (2017).
+- **Ground pictures are radar and infrared, not colour photographs**: Magellan's radar mosaic and Cassini's 938 nm map through the haze, with their contrast softened. The colour and brightness of the ground come from the landers instead (Venera 13 and 14 for Venus, reflectance about 0.1; Huygens for Titan, about 0.13).
+- **Light is computed from the probes' measurements** (`src/render/thickair.ts`). With the Sun overhead, about 4% of the sunlight reaches Venus's ground (Pioneer Venus, Venera) and 10% reaches Titan's (Huygens), reddened. It arrives from the whole sky, so the ground is lit like an overcast day. The air between you and the ground is computed from its density: Venus's CO2 scatters about 1 km⁻¹ at the ground, so the view fades within a few kilometres, and from 20 km up the ground cannot be seen at all. On Titan you see tens of kilometres, and in red light the Sun casts soft shadows.
+- **Relief below the data is computed** (`src/core/relief.ts`). Rock roughness follows Magellan's measured slopes at metre scales (smooth plains to rough lava flows). Titan's dark equatorial belts get linear dunes 3 km apart and 100 m high, running east-west as Cassini radar saw them. The noise and dunes are not measurements of the real surface.
+- **Titan's seas are flat and liquid**: inside the IAU outlines of each mare and lacus, ground below its level is methane, a dark mirror for the sky.
+- **Gate**: `tests/worlds.test.ts` puts Maxwell Montes 10.3 km above Venus's mean radius (Ford and Pettengill 1992: 10.8 to 11 km; the tiles' 9 km cells average the summit down). It checks that Titan's seas lie at one level below its equator, and that Venus and Titan have NASA's surface gravity. `tests/relief.test.ts` checks that the computed relief is zero-mean, scales with roughness and leaves out what the mesh can't show, and that the dunes have the right spacing and height.
+
+### Limits
+
+- The ground's colour is a single tint per world times radar or infrared brightness, not real colour. No one has photographed most of either surface in visible light.
+- Titan's elevation model is interpolated over 90% of the moon, and its sea outlines are approximate. The sea level is set from the ground around each sea.
+- Venus has no lightning, wind or heat shimmer. Titan has no rain or methane clouds.
+- The new tiles add 36 MB.
+
+## Land anywhere
 
 **Every solid world in the Solar System has terrain you can land on and walk.** Besides Earth, the Moon and Mars: Mercury, Ceres, Vesta, Phobos, Io, Europa, Ganymede, Callisto, Enceladus, Tethys, Dione, Rhea, Iapetus, Triton, Pluto and Charon. Fly the ship down and press O, or press `Walk here` near the ground. Walking pace and jumps follow each world's gravity (0.006 m/s² on Phobos, 0.25 on Ceres, 3.7 on Mercury).
 
@@ -22,7 +42,6 @@ The full plan, including the roadmap, lives in the [design doc](https://claude.a
 
 ### Limits
 
-- Venus and Titan have no terrain yet: their surfaces are under thick atmospheres the renderer doesn't draw from below.
 - Detail stops at the data: heights are 0.4 km (Vesta) to 3.7 km (Mercury) apart and pictures 0.6 to 2 km per pixel, so on foot the ground near you is smooth with only a fine grain. Only Tranquility Base and Jezero have metre-scale terrain.
 - Gravity points at the centre (a point mass plus spin). On lumpy Vesta and Phobos real gravity is tilted from that by several degrees, and Mars' tide on Phobos is left out.
 - Tiles add 220 MB to the site.
@@ -369,6 +388,7 @@ Tiles are geographic: level L has 2^(L+1) × 2^L tiles of 180/2^L degrees. Colou
 - NAIF satellite ephemerides mar099, jup365, sat441, ura184, nep097, plu060 (Jacobson et al.) and JPL's sb441-n16 asteroid ephemeris.
 - USGS Astrogeology global mosaics: MESSENGER MDIS (NASA/JHUAPL/CIW), Viking Orbiter, Mars Express SRC (ESA/DLR/FU Berlin), Galileo SSI and Voyager, Cassini ISS (NASA/JPL), Dawn FC (NASA/JPL, DLR), New Horizons LORRI (NASA/JHUAPL/SwRI).
 - USGS Astrogeology global elevation models: MESSENGER MLA/MDIS stereo DEM of Mercury (Becker et al. 2016), Dawn HAMO/LAMO DEMs of Ceres and Vesta (DLR), Phobos shape from Mars Express HRSC, Enceladus shape model (Bland et al. 2019), New Horizons DEMs of Pluto and Charon (Schenk et al. 2018).
+- Magellan radar mosaic (C3-MDIR), altimetry and metre-scale slope maps of Venus (NASA/JPL, USGS Astrogeology). Cassini ISS 938 nm global mosaic of Titan (NASA/JPL/SSI, USGS). Titan topography of Corlies et al. (2017), Hayes Research Group, Cornell.
 - Gazetteer of Planetary Nomenclature (IAU Working Group for Planetary System Nomenclature and USGS Astrogeology): names, centres and sizes of surface features.
 - Hubble OPAL global maps of Jupiter, Saturn, Uranus and Neptune (Simon et al., MAST HLSP); Uranus and Neptune true colours from Irwin et al. 2024.
 - Cassini RSS Saturn ring occultation, Rev 7 (PDS Ring-Moon Systems Node, CORSS_8001).

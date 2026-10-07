@@ -114,6 +114,13 @@ const views = {
   'io-loki': `focus=Io&t=2026-10-06T03:27:00Z&lat=13&lon=51.2&dist=700&heading=0&tilt=40`,
   'europa-conamara': `focus=Europa&t=2026-10-05T21:30:00Z&lat=9.7&lon=87.3&dist=200&heading=0&tilt=35`,
   'pluto-sputnik': `focus=Pluto&t=2026-10-09T12:24:00Z&lat=19.5&lon=178.7&dist=1700&heading=0&tilt=45`,
+  // Under thick atmospheres: Venus's ground under the clouds, Titan's under the haze.
+  'venus-clouds': `focus=Venus&t=2026-12-12T00:00:00Z&lat=-7.55&lon=-56.31&dist=30000&heading=0&tilt=0`,
+  'venus-venera13': `focus=Venus&t=2026-12-12T00:00:00Z&lat=-7.55&lon=-56.31&dist=0.05&heading=0&tilt=8&walk=1`,
+  'venus-maxwell': `focus=Venus&t=2027-01-01T00:00:00Z&lat=64.6&lon=3.3&dist=0.05&heading=0&tilt=10&walk=1`,
+  'titan-huygens': `focus=Titan&t=2026-10-08T00:00:00Z&lat=-10.573&lon=167.665&dist=0.05&heading=90&tilt=6&walk=1`,
+  'titan-dunes': `focus=Titan&t=2026-10-10T00:00:00Z&lat=-5.5&lon=105&dist=0.05&heading=0&tilt=6&walk=1`,
+  'titan-ligeia': `focus=Titan&t=2026-10-11T12:00:00Z&lat=76.85&lon=112&dist=0.05&heading=0&tilt=4&walk=1`,
   // Star systems: stars up close, binary companions, exoplanets (looks estimated).
   'sirius-system': `focus=Sirius&t=${T}&dist=1.5e10&pitch=1.2`,
   'sirius-b': `focus=Sirius%20B&t=${T}&dist=40000`,

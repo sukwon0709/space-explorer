@@ -22,7 +22,7 @@ import zipfile
 
 NAMES = "https://asc-planetarynames-data.s3.us-west-2.amazonaws.com/{}_nomenclature_center_pts.zip"
 BODIES = {
-    "MERCURY": 199, "MOON": 301, "MARS": 499, "PHOBOS": 401, "CERES": 2000001, "VESTA": 2000004,
+    "MERCURY": 199, "VENUS": 299, "TITAN": 606, "MOON": 301, "MARS": 499, "PHOBOS": 401, "CERES": 2000001, "VESTA": 2000004,
     "IO": 501, "EUROPA": 502, "GANYMEDE": 503, "CALLISTO": 504, "ENCELADUS": 602, "TETHYS": 603,
     "DIONE": 604, "RHEA": 605, "IAPETUS": 608, "TRITON": 801, "PLUTO": 999, "CHARON": 901,
 }

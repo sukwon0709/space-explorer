@@ -5,6 +5,7 @@ import type { Mat3 } from '../core/orientation';
 import { buildTileGeometry, type TileGeometry } from '../core/terrainmesh';
 import { tileBounds, tileSize, type HeightTile, type TileRef, type TileStore } from '../core/tilestore';
 import { ATMOSPHERE, MARS_ATMOSPHERE, atmosphereGlsl, type AtmosphereParams } from './atmosphere';
+import { thickAirGlsl, type ThickAirParams } from './thickair';
 
 const DEG = Math.PI / 180;
 const GRID = 65;
@@ -14,7 +15,7 @@ const TEXEL_PIXELS = 1.15;
 /** How many levels a tile may refine past its deepest height or colour data. */
 const EXTRA_LEVELS = 3;
 
-export type SurfaceKind = 'earth' | 'mars' | 'airless';
+export type SurfaceKind = 'earth' | 'mars' | 'airless' | 'thick';
 
 /** Per-frame inputs, all float64 until they are handed to three.js. */
 export interface GlobeFrame {
@@ -172,6 +173,29 @@ void main() {
   vec3 inscatter, transmittance;
   atmBetween(cam, p, uSun, inscatter, transmittance);
   color = color * transmittance + inscatter * uSunIntensity;
+#elif defined(THICK)
+  // Under a thick atmosphere (thickair.ts): the ground is lit by the whole sky, more on
+  // slopes facing up, plus whatever direct sunbeam gets through; then the air between it
+  // and the eye.
+  vec3 cam = uCamBody;
+  vec3 p = cam + rel;
+  vec3 up = normalize(p);
+  float h = length(p) - TA_R;
+  float mu0 = dot(up, uSun);
+  vec3 diffuse = taDiffuse(h, mu0);
+  vec3 direct = taDirect(h, mu0);
+  vec3 color = albedo * (diffuse * (0.55 + 0.45 * dot(n, up)) + direct * max(ndl, 0.0));
+  if (vWater > 0.5) {
+    // Liquid methane and ethane: dark, a mirror for the sky and the dim Sun.
+    float fresnel = 0.02 + 0.98 * pow(1.0 - max(dot(n, -viewDir), 0.0), 5.0);
+    vec3 hv = normalize(uSun - viewDir);
+    color = albedo * 0.15 * diffuse + fresnel * diffuse + direct * pow(max(dot(n, hv), 0.0), 400.0) * 40.0 * fresnel * step(0.0, ndl);
+  }
+  color *= uSunIntensity;
+  vec3 inscatter, transmittance;
+  float dist = length(rel);
+  taScatter(cam, rel / dist, 0.0, dist, uSun, inscatter, transmittance);
+  color = color * transmittance + inscatter * uSunIntensity;
 #else
   // Airless regolith: mostly Lommel-Seeliger (the flat, bright limb of the full Moon).
   float mu0 = max(ndl, 0.0);
@@ -221,17 +245,24 @@ export class Globe {
   pending = 0;
   readonly atmosphere?: AtmosphereParams;
   private readonly fragment: string;
+  /** Computed relief below the data's resolution (relief.ts), if the world has any. */
+  readonly relief?: (lon: number, lat: number, spacing: number) => number;
+  /** Tiles wait for the relief's map, so every tile (and the walker's ground) has the same relief. */
+  private readonly reliefReady?: Promise<unknown>;
 
   constructor(
     readonly bodyId: number,
     readonly shape: Shape,
     private readonly store: TileStore,
-    /** Earth (air, oceans, city lights), Mars (dust) or an airless body. */
+    /** Earth (air, oceans, city lights), Mars (dust), an airless body, or one under a thick atmosphere. */
     readonly kind: SurfaceKind,
+    options: { air?: ThickAirParams; relief?: (lon: number, lat: number, spacing: number) => number; reliefReady?: Promise<unknown> } = {},
   ) {
     this.uniforms.uFlatten.value = shape.a / shape.b;
     this.atmosphere = kind === 'earth' ? ATMOSPHERE : kind === 'mars' ? MARS_ATMOSPHERE : undefined;
-    this.fragment = fragmentShader(atmosphereGlsl(this.atmosphere ?? ATMOSPHERE));
+    this.relief = options.relief;
+    this.reliefReady = options.reliefReady;
+    this.fragment = fragmentShader(atmosphereGlsl(this.atmosphere ?? ATMOSPHERE) + (options.air ? thickAirGlsl(options.air) : ''));
     this.blankNight.needsUpdate = true;
     this.roots = [this.makeNode(0, 0, 0), this.makeNode(0, 1, 0)];
     this.group.name = `globe-${bodyId}`;
@@ -333,7 +364,7 @@ export class Globe {
     const split =
       node.level < MAX_LEVEL &&
       texelPixels > TEXEL_PIXELS &&
-      (node.dataLevel === undefined || node.level < node.dataLevel + EXTRA_LEVELS) &&
+      (node.dataLevel === undefined || this.relief !== undefined || node.level < node.dataLevel + EXTRA_LEVELS) &&
       this.inView(node, f);
 
     if (split) {
@@ -367,7 +398,7 @@ export class Globe {
   private aboveHorizon(node: Node, eye: Vec3): boolean {
     if (node.level < 2) return true;
     const r0 = Math.min(this.shape.a, this.shape.b) - 11; // below the deepest basins
-    const lift = 1 + 9 / this.shape.a; // highest mountains
+    const lift = 1 + 12 / this.shape.a; // highest mountains (Maxwell Montes, 11.7 km)
     const eyeHorizon = Math.sqrt(Math.max(eye[0] ** 2 + eye[1] ** 2 + eye[2] ** 2 - r0 * r0, 0));
     // Margin: the tile's own width, since its interior can rise above its samples.
     const margin = tileSize(node.level) * DEG * this.shape.a;
@@ -397,6 +428,7 @@ export class Globe {
   }
 
   private async build(node: Node): Promise<void> {
+    if (this.reliefReady) await this.reliefReady.catch(() => undefined);
     const { level, x, y } = node;
     const heightRef = this.store.locate(this.bodyId, 'height', level, x, y);
     const colorRef = this.store.locate(this.bodyId, 'color', level, x, y);
@@ -407,7 +439,7 @@ export class Globe {
       nightRef ? this.texture(nightRef) : Promise.resolve(null),
     ]);
     node.dataLevel = Math.max(heightRef?.level ?? 0, colorRef?.level ?? 0);
-    const geometry = buildTileGeometry(this.shape, level, x, y, GRID, heights && heightRef ? { tile: heights, level: heightRef.level, x: heightRef.x, y: heightRef.y, grid: this.store.grid } : null);
+    const geometry = buildTileGeometry(this.shape, level, x, y, GRID, heights && heightRef ? { tile: heights, level: heightRef.level, x: heightRef.x, y: heightRef.y, grid: this.store.grid } : null, this.relief);
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(geometry.positions, 3));
     g.setAttribute('normal', new THREE.BufferAttribute(geometry.normals, 3));
@@ -420,7 +452,7 @@ export class Globe {
     const material = new THREE.ShaderMaterial({
       vertexShader,
       fragmentShader: this.fragment,
-      defines: this.kind === 'earth' ? { ATMOSPHERE: '' } : this.kind === 'mars' ? { ATMOSPHERE: '', DUSTY: '' } : {},
+      defines: this.kind === 'earth' ? { ATMOSPHERE: '' } : this.kind === 'mars' ? { ATMOSPHERE: '', DUSTY: '' } : this.kind === 'thick' ? { THICK: '' } : {},
       side: THREE.DoubleSide,
       uniforms: {
         ...this.uniforms,

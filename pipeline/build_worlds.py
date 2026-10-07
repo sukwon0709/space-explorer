@@ -33,6 +33,7 @@ import math
 import os
 import re
 import sys
+import zlib
 
 import numpy as np
 from PIL import Image
@@ -92,12 +93,40 @@ WORLDS = [
     ("charon", 901, "Charon_NewHorizons_Global_Mosaic_300m_Jul2017_8bit", "#b1a79e", 4,
      ("Charon_NewHorizons_Global_DEM_300m_Jul2017_16bit", "sphere", 4),
      "New Horizons LORRI mosaic 300 m (NASA/JHUAPL/SwRI, USGS)", "New Horizons LORRI stereo DEM 300 m (NASA/JHUAPL/SwRI, USGS)"),
+    # The two worlds whose ground no camera in orbit can see. Their maps are radar
+    # (Venus) and near-infrared through the haze (Titan); see VENUS and TITAN below.
+    ("venus", 299, "Venus_Magellan_C3-MDIR_Global_Mosaic_2025m", "#6f655c", 5,
+     ("Venus_Magellan_Topography_Global_4641m_v02", "sphere", 5),
+     "Magellan SAR C3-MDIR mosaic 2 km (NASA/JPL, USGS), as surface texture",
+     "Magellan altimetry 4.6 km (NASA/JPL, USGS)"),
+    ("titan", 606, "Titan_ISS_P19658_Mosaic_Global_4km", "#8a6a48", 3,
+     ("topo_4PPD_interp", "sphere", 4),
+     "Cassini ISS 938 nm mosaic 4 km (NASA/JPL/SSI, USGS)",
+     "Cassini radar topography, interpolated (Corlies et al. 2017)"),
 ]
+
+# Surfaces seen through thick atmospheres. The maps are not pictures in visible light:
+# Magellan's radar brightness says how rough the ground is at 12 cm, and Cassini's
+# 938 nm images see through Titan's haze in a narrow window. So their contrast is
+# reduced (`contrast`, a power on brightness about the mean) and the colour and albedo
+# come from the landers: Venera 13/14 colour images corrected for the orange light under
+# the clouds (Pieters et al. 1986: a dark surface, reflectance about 0.1, rising to the
+# red), and Huygens DISR spectra of the ground at its landing site (Tomasko et al.
+# 2005: reflectance about 0.1 in green rising to 0.2 in the near infrared).
+# Magellan missed about 8% of Venus in strips; they are filled from the ground around
+# them (`fill`: inpaint), not left as flat bands.
+# `relief` maps (public/data/relief/NAME.png) steer the detail the app computes below
+# the resolution of the elevation models: red is roughness, green is where dunes are.
+EXTRA = {
+    "venus": {"albedo": 0.1, "color": "#6f655c", "contrast": 0.45, "atmosphere": "venus", "fill": "inpaint",
+              "roughness": "Venus_Magellan_MeterScaleSlope_Global_4641m"},
+    "titan": {"albedo": 0.13, "color": "#80705c", "contrast": 0.4, "atmosphere": "titan", "seas": True},
+}
 
 # Mosaics whose left and right edges do not match in brightness (build_maps.SEAMED).
 SEAMED = {"phobos"}
 # Elevation models without a label of their own: their longitudes run east.
-POSITIVE_EAST = {"enceladus_2019pm_radius"}
+POSITIVE_EAST = {"enceladus_2019pm_radius", "topo_4PPD_interp"}
 
 
 def iau_radii(body):
@@ -150,16 +179,78 @@ def read_global(path, width, resampling="average"):
     return np.roll(img, shift, axis=1), np.roll(valid, shift, axis=1)
 
 
-def colour_map(path, width, tint, seamed):
+def pull_push(img, valid):
+    """Fill invalid cells smoothly from the valid ones around them: average down a
+    pyramid counting only valid cells, then fill each level's holes from the coarser one."""
+    img = img.astype(np.float32)
+    w = valid.astype(np.float32)
+    if img.ndim == 2:
+        img = img[..., None]
+    levels = [(img * w[..., None], w)]
+    while min(levels[-1][1].shape) > 2:
+        a, b = levels[-1]
+        H, W = (b.shape[0] // 2) * 2, (b.shape[1] // 2) * 2
+        a, b = a[:H, :W], b[:H, :W]
+        levels.append((a.reshape(H // 2, 2, W // 2, 2, -1).sum((1, 3)), b.reshape(H // 2, 2, W // 2, 2).sum((1, 3))))
+    filled = levels[-1][0] / np.maximum(levels[-1][1], 1e-6)[..., None]
+    for a, b in reversed(levels[:-1]):
+        from scipy.ndimage import zoom
+
+        up = zoom(filled, (b.shape[0] / filled.shape[0], b.shape[1] / filled.shape[1], 1), order=1, mode="nearest", grid_mode=True)
+        k = np.clip(b, 0, 1)[..., None]
+        filled = np.where(b[..., None] > 0, a / np.maximum(b, 1e-6)[..., None], up) * k + up * (1 - k)
+    return filled
+
+
+def inpaint(img, valid):
+    """Fill gaps in a mosaic with something that looks like its surroundings: the smooth
+    fill of pull_push plus fine detail copied from nearby valid ground (displaced
+    sideways, since Magellan's gaps are north-south strips)."""
+    from scipy.ndimage import gaussian_filter
+
+    from scipy.ndimage import binary_erosion
+
+    img = img.astype(np.float32)
+    squeeze = img.ndim == 2
+    if squeeze:
+        img = img[..., None]
+    # Pixels at the edge of a gap are often part-filled: treat them as missing too.
+    valid = binary_erosion(valid, iterations=2, border_value=1)
+    base = pull_push(img, valid)
+    smooth = np.stack([gaussian_filter(np.where(valid, img[..., c], base[..., c]), 3, mode="wrap") for c in range(img.shape[2])], -1)
+    detail = np.where(valid[..., None], img - smooth, 0)
+    fill = np.zeros_like(img)
+    have = np.zeros(valid.shape, bool)
+    for dx in (41, -53, 97, -131, 197, -263):
+        moved = np.roll(detail, dx, axis=1)
+        ok = np.roll(valid, dx, axis=1) & ~have
+        fill[ok] = moved[ok]
+        have |= ok
+    out = np.where(valid[..., None], img, base + fill)
+    return out[..., 0] if squeeze else out
+
+
+def colour_map(path, width, tint, seamed, contrast=1.0, fill="rows"):
     img, valid = read_global(path, width)
-    valid &= img.max(axis=2) > 0.5
+    valid &= img.max(axis=2) > (6 if fill == "inpaint" else 0.5)
+    if fill == "inpaint":
+        # Magellan's mosaic also has thin dark lines where orbit strips meet: pixels far
+        # darker than the ground around them are treated as gaps.
+        from scipy.ndimage import median_filter
+
+        grey = img.mean(axis=2)
+        valid &= grey > 0.6 * median_filter(grey, size=9, mode="wrap")
     if seamed:
         img = blend_seam(img, width // 32)
-    img = fill_gaps(img, valid)
+    img = inpaint(img, valid) if fill == "inpaint" else fill_gaps(img, valid)
     if img.shape[2] == 1 or tint:
         grey = img[..., 0] if img.shape[2] == 1 else img[..., :3] @ np.array([0.2126, 0.7152, 0.0722], np.float32)
         lin = srgb_to_linear(grey).astype(np.float32)
-        lin = lin / lin[valid].mean() * 0.25
+        lin = lin / lin[valid].mean()
+        if contrast != 1.0:
+            lin = np.power(np.maximum(lin, 1e-4), contrast)
+            lin = lin / lin[valid].mean()
+        lin = lin * 0.25
         t = srgb_to_linear(hex_rgb(tint))
         rgb = linear_to_srgb(lin[..., None] * (t / t.max())[None, None, :].astype(np.float32))
     else:
@@ -178,7 +269,7 @@ def feathered(h, valid, cells_per_km):
     return np.where(valid, h, 0) * alpha
 
 
-def height_map(path, width, reference, R_ref_km, radii):
+def height_map(path, width, reference, R_ref_km, radii, fill="feather"):
     """Heights (m) above the sphere of radius R_ref_km on the global grid."""
     import rasterio
 
@@ -200,21 +291,109 @@ def height_map(path, width, reference, R_ref_km, radii):
     else:  # above the ellipsoid
         rel = h
     cells_per_km = width / (2 * math.pi * R_ref_km)
+    if fill == "inpaint":
+        return inpaint(np.where(valid, rel, 0), valid) + ell, float(valid.mean())
     return feathered(rel, valid, cells_per_km) + ell, float(valid.mean())
+
+
+def raster_path(data, name):
+    """A product's file: the GeoTIFF, or the ISIS cube some come as."""
+    tif = os.path.join(data, name + ".tif")
+    return tif if os.path.exists(tif) else os.path.join(data, name + ".cub")
+
+
+def seas(heights, body, data):
+    """Titan's seas and large lakes: inside each named mare or lacus (IAU Gazetteer
+    extents), ground below its level is liquid, and lies flat at that level. The level
+    is the 30th percentile of the ground in the feature's box: the interpolated
+    elevation model smooths the shores, so the sea fills the lower part of its basin."""
+    from build_features import read_dbf
+
+    h = heights.copy()
+    water = np.zeros(h.shape, bool)
+    rows = [r for r in read_dbf(os.path.join(data, "names", "TITAN_nomenclature_center_pts.dbf"))
+            if r["approval"] == "Adopted by IAU" and r["type"].split(",")[0] in ("Mare", "Lacus")]
+    H, W = h.shape
+    n = 0
+    for r in rows:
+        try:
+            la0, la1 = sorted((float(r["min_lat"]), float(r["max_lat"])))
+            lo0, lo1 = float(r["min_lon"]), float(r["max_lon"])
+        except ValueError:
+            continue
+        if float(r["diameter"] or 0) < 20:
+            continue
+        j0, j1 = int((90 - la1) / 180 * H), int(np.ceil((90 - la0) / 180 * H))
+        lo0, lo1 = (lo0 + 180) % 360 - 180, (lo1 + 180) % 360 - 180
+        i0, i1 = int((lo0 + 180) / 360 * W), int(np.ceil((lo1 + 180) / 360 * W))
+        cols = np.arange(i0, i1 if i1 >= i0 else i1 + W) % W
+        box = h[j0:j1 + 1][:, cols]
+        if box.size == 0:
+            continue
+        level = np.percentile(box, 30)
+        wet = box <= level
+        sub = h[j0:j1 + 1]
+        part = sub[:, cols]
+        part[wet] = level
+        sub[:, cols] = part
+        wsub = water[j0:j1 + 1]
+        wpart = wsub[:, cols]
+        wpart |= wet
+        wsub[:, cols] = wpart
+        n += 1
+    print(f"titan: {n} seas and lakes, {water.mean() * 100:.2f}% of the surface")
+    return h, water
+
+
+def relief_map(name, rgb_path, extra, data, out_dir):
+    """A 1024 x 512 map steering the detail the app computes: red is roughness (0-1),
+    green is dune cover (0-1)."""
+    W, H = 1024, 512
+    lats = 90 - (np.arange(H) + 0.5) * 180 / H
+    rough = np.full((H, W), 0.5, np.float32)
+    dunes = np.zeros((H, W), np.float32)
+    if "roughness" in extra:
+        # Magellan's RMS slope at metre scales (degrees): plains about 3, the roughest
+        # lava flows and tesserae 10 and more.
+        s, valid = read_global(raster_path(data, extra["roughness"]), W)
+        s = s[..., 0]
+        valid &= (s > 0) & (s < 60)
+        s = fill_gaps(s[..., None], valid)[..., 0]
+        rough = np.clip((s - 1.5) / 10.0, 0, 1)
+    if name == "titan":
+        # The dark equatorial belts in the 938 nm mosaic are the dune seas (Lorenz et
+        # al. 2006; Rodriguez et al. 2014): between 30 S and 30 N, where the ground is
+        # well below the mean brightness. Bright highlands (Xanadu) are rougher.
+        img, valid = read_global(rgb_path, W)
+        g = srgb_to_linear(img[..., 0])
+        g = g / g[valid & (np.abs(lats)[:, None] < 30)].mean()
+        from scipy.ndimage import gaussian_filter
+
+        band = (np.abs(lats) < 30)[:, None] * np.clip((np.abs(lats)[:, None] - 30) / -5, 0, 1)
+        dunes = np.clip((0.85 - gaussian_filter(g, 1.5)) / 0.3, 0, 1) * band
+        rough = np.clip(0.25 + 0.5 * (gaussian_filter(g, 2) - 0.8), 0.1, 0.9).astype(np.float32)
+    os.makedirs(out_dir, exist_ok=True)
+    img = np.zeros((H, W, 3), np.uint8)
+    img[..., 0] = np.round(rough * 255)
+    img[..., 1] = np.round(dunes * 255)
+    path = os.path.join(out_dir, f"{name}.png")
+    Image.fromarray(img).save(path, optimize=True)
+    print(f"{path}: dunes cover {dunes.mean() * 100:.1f}%")
 
 
 def build_world(data, out, layers, world):
     name, body, mosaic, tint, clevel, dem, csource, hsource = world
+    extra = EXTRA.get(name, {})
     radii = iau_radii(body)
     R = round(float(np.cbrt(radii[0] * radii[1] * radii[2])), 3) if dem is None or dem[1] == "ellipsoid" else None
     if R is None:
         import rasterio
-        with rasterio.open(os.path.join(data, dem[0] + ".tif")) as d:
+        with rasterio.open(raster_path(data, dem[0])) as d:
             R = round(float(re.search(r"\+R=([\d.]+)", d.crs.to_proj4()).group(1)) / 1000, 3)
     all_tiles = lambda top: [(l, x, y) for l in range(top + 1) for y in range(2**l) for x in range(2 ** (l + 1))]
 
     width = IMAGE * 2 ** (clevel + 1)
-    rgb, coverage = colour_map(os.path.join(data, mosaic + ".tif"), width, tint, name in SEAMED)
+    rgb, coverage = colour_map(raster_path(data, mosaic), width, tint, name in SEAMED, extra.get("contrast", 1.0), extra.get("fill", "rows"))
     cpyr = Pyramid(rgb)
 
     def make_c(level, x, y):
@@ -229,9 +408,12 @@ def build_world(data, out, layers, world):
     sample = cpyr.raster(tile_size(2) / IMAGE).data
     mean = [round(float(v), 5) for v in srgb_to_linear(np.clip(sample, 0, 255)).reshape(-1, 3).mean(axis=0)]
 
+    water = None
     if dem is not None:
         hfile, reference, hlevel = dem
-        heights, hcov = height_map(os.path.join(data, hfile + ".tif"), (GRID - 1) * 2 ** (hlevel + 2), reference, R, radii)
+        heights, hcov = height_map(raster_path(data, hfile), (GRID - 1) * 2 ** (hlevel + 2), reference, R, radii, "inpaint" if extra.get("fill") == "inpaint" else "feather")
+        if extra.get("seas"):
+            heights, water = seas(heights, body, data)
     else:
         hlevel, hcov = 2, 0.0
         lats = 90 - (np.arange(512) + 0.5) * 360 / 1024
@@ -240,17 +422,29 @@ def build_world(data, out, layers, world):
         heights = ((ellipsoid_radius(radii, LON, LAT) - R) * 1000).astype(np.float32)
         hsource = "IAU triaxial ellipsoid (pck00011); no global elevation model"
     hpyr = Pyramid(heights)
+    wpyr = Pyramid(water.astype(np.float32)) if water is not None else None
     unit, offset = height_scale(float(heights.min()) - 100, float(heights.max()) + 100)
 
     def make_h(level, x, y):
         lons, lats = grid_points(level, x, y)
-        return encode_heights(hpyr.raster(tile_size(level) / (GRID - 1)).sample(lons, lats), unit, offset)
+        h = hpyr.raster(tile_size(level) / (GRID - 1)).sample(lons, lats)
+        if wpyr is None:
+            return encode_heights(h, unit, offset)
+        wet = wpyr.raster(tile_size(level) / (GRID - 1)).sample(lons, lats) > 0.5
+        q = np.clip(np.round((h - offset) / unit), -32768, 32767).astype(np.int32) & ~1
+        return zlib.compress((q | wet.astype(np.int32)).astype("<i2").tobytes(), 9)
 
     layers[f"{name}-height"] = write_layer(out, {
         "id": f"{name}-height", "body": body, "kind": "height", "bbox": [-180, -90, 180, 90], "levels": [0, hlevel],
         "source": hsource, "heightUnit": unit, "heightOffset": offset,
     }, all_tiles(hlevel), make_h)
     info = {"body": body, "name": name, "radius": R, "mean": mean, "colourCoverage": round(coverage, 3), "heightCoverage": round(hcov, 3)}
+    for key in ("albedo", "color", "atmosphere"):
+        if key in extra:
+            info[key] = extra[key]
+    if extra:
+        relief_map(name, raster_path(data, mosaic), extra, data, os.path.join(out, "..", "relief"))
+        info["relief"] = True
     print(info)
     return info
 
