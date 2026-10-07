@@ -11,7 +11,7 @@ import type { Vec3 } from '../core/ephemeris';
  * Placed every frame relative to the camera, like everything else.
  */
 
-const vertex = /* glsl */ `
+export const LIT_VERTEX = /* glsl */ `
 varying vec3 vNormal;
 #include <common>
 #include <logdepthbuf_pars_vertex>
@@ -22,7 +22,7 @@ void main() {
 }
 `;
 
-const fragment = /* glsl */ `
+export const LIT_FRAGMENT = /* glsl */ `
 uniform vec3 uColor;
 uniform vec3 uSunDir;
 uniform float uSunIntensity;
@@ -55,8 +55,8 @@ export class Lander {
 
   constructor(ascent: boolean) {
     const material = (hex: string, shine = 0) => new THREE.ShaderMaterial({
-      vertexShader: vertex,
-      fragmentShader: fragment,
+      vertexShader: LIT_VERTEX,
+      fragmentShader: LIT_FRAGMENT,
       uniforms: { ...this.uniforms, uColor: { value: linear(hex) }, uShine: { value: shine } },
     });
     const gold = material('#b8892e', 0.5);
@@ -123,7 +123,7 @@ function strut(add: (g: THREE.BufferGeometry, m: THREE.Material, x?: number, y?:
   mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), d.normalize());
 }
 
-function linear(hex: string): THREE.Vector3 {
+export function linear(hex: string): THREE.Vector3 {
   const c = new THREE.Color(hex);
   return new THREE.Vector3(c.r, c.g, c.b).multiplyScalar(0.6);
 }

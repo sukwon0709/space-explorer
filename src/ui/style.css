@@ -11,7 +11,7 @@ html, body { margin: 0; height: 100%; background: #000; color: var(--ink); font:
 #focus-name { font-size: 20px; font-weight: 600; }
 #focus-detail { color: var(--quiet); white-space: pre-line; }
 #bodies { position: fixed; top: 16px; right: 16px; display: flex; flex-direction: column; gap: 4px; }
-#bodies button, #layers button, #timebar button, #search, #systems, #date, #events, #tours, #tour button { background: var(--panel); color: var(--ink); border: 1px solid rgba(255,255,255,0.12); border-radius: 6px; padding: 5px 10px; font: inherit; cursor: pointer; }
+#bodies button, #layers button, #timebar button, #search, #systems, #missions, #date, #events, #tours, #tour button, #mission button, #mission select { background: var(--panel); color: var(--ink); border: 1px solid rgba(255,255,255,0.12); border-radius: 6px; padding: 5px 10px; font: inherit; cursor: pointer; }
 #bodies button.focus, #layers button.active, #timebar button.active { border-color: var(--accent); color: var(--accent); }
 #timebar { position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%); display: flex; gap: 4px; align-items: center; padding: 6px; background: var(--panel); border-radius: 8px; max-width: calc(100vw - 32px); overflow-x: auto; }
 #utc { padding: 0 10px; font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -22,9 +22,9 @@ html, body { margin: 0; height: 100%; background: #000; color: var(--ink); font:
 }
 .label.satellite { color: #ffd27a; opacity: 0.85; pointer-events: none; }
 .label.satellite::before { border: none; width: 0; }
-#search, #systems { width: 150px; margin-bottom: 4px; }
+#search, #systems, #missions { width: 150px; margin-bottom: 4px; }
 #search.miss { border-color: #ff7a7a; }
-#date, #events, #tours, #systems { padding: 4px 6px; color-scheme: dark; }
+#date, #events, #tours, #systems, #missions, #mission select { padding: 4px 6px; color-scheme: dark; }
 .label.moon, .label.asteroid { font-size: 12px; opacity: 0.85; }
 .label.moon::before, .label.asteroid::before { width: 5px; height: 5px; }
 .label.smallbody { color: #9fe3ff; }
@@ -109,3 +109,16 @@ body.walking #view { cursor: grab; }
   #flight-pad, #walk-pad { bottom: 160px; }
   .flight-message { top: 40%; font-size: 14px; }
 }
+/* A spacecraft mission: story, speed chart, moments and pacing, at the bottom left. */
+#mission { position: fixed; left: 16px; bottom: 80px; width: min(360px, calc(100vw - 32px)); padding: 8px 12px 10px; background: var(--panel); border-radius: 8px; }
+#mission[hidden] { display: none; }
+.mission-head { display: flex; align-items: center; }
+.mission-title { flex: 1; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--quiet); }
+#mission .mission-close { background: none; border: none; color: var(--quiet); font-size: 18px; padding: 0 4px; line-height: 1; }
+.mission-summary { font-size: 13px; margin: 2px 0 6px; }
+.mission-chart { width: 100%; height: 75px; display: block; cursor: pointer; }
+.mission-controls { display: flex; gap: 4px; margin-top: 6px; }
+.mission-moments { flex: 1; min-width: 0; }
+#mission .mission-pace.active { border-color: var(--accent); color: var(--accent); }
+.mission-note { margin-top: 6px; font-size: 12px; color: var(--quiet); }
+@media (max-width: 720px) { #mission { left: 8px; right: 8px; width: auto; bottom: 160px; } .mission-summary { display: none; } }
