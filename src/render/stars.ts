@@ -231,6 +231,10 @@ export class StarField {
     this.material.uniforms.uHideWithin.value = pc;
   }
 
+  get hideWithin(): number {
+    return this.material.uniforms.uHideWithin.value;
+  }
+
   /**
    * @param camera barycentric ICRS position of the camera, parsecs (float64).
    * @param years years since J2016.0.

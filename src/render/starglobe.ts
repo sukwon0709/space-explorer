@@ -211,7 +211,7 @@ export class StarGlobe {
     u.uColor.value.copy(starColor(look.teff));
     // Capped: a disc far brighter than the exposure would tone-map to plain white and
     // lose its colour; the glare around it says how bright it is.
-    u.uBrightness.value = Math.min(4, 7 * SUN_SURFACE_BRIGHTNESS * look.surface * exposure);
+    u.uBrightness.value = Math.min(1.5, 7 * SUN_SURFACE_BRIGHTNESS * look.surface * exposure);
     u.uLimb.value = look.degenerate ? 0.6 : limbScale(look.teff);
     const g = granulation(look);
     u.uFreq.value = g.freq;
