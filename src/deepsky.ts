@@ -329,6 +329,14 @@ export class DeepSky {
       lines.push(`About ${formatLightYearCount(2 * this.nebulaRadiusPc(n) * 3.261563777)} across`);
       lines.push(`Magnitude ${(n.V ?? 0).toFixed(1)} from Earth`);
       lines.push(n.within ? `In the ${n.within}, part of its 3D model` : 'Picture: DSS2 colour plates, as seen from Earth');
+      const shown = this.images.shown(n.name);
+      if (shown.detail?.kind === 'survey') {
+        lines.push(`Close-up of ${shown.detail.what}: ${shown.detail.source} (${shown.detail.arcsec}″ per pixel)`);
+      } else if (shown.detail?.kind === 'ai') {
+        lines.push(`Close-up of ${shown.detail.what}: AI-enhanced ×4 (Real-ESRGAN), matched to the survey at its resolution`);
+      } else if (n.detail?.length) {
+        lines.push(`Close-up of ${n.detail[0].what} as you approach (${n.detail[0].arcsec}″ survey, then AI ×4)`);
+      }
     } else if (id >= CLUSTER_ID && this.index) {
       const c = this.index.clusters[id - CLUSTER_ID];
       lines.push(`Galaxy cluster around ${c.centre}`);
