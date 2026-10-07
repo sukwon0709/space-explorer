@@ -4,7 +4,33 @@ A real-time 3D simulator for travelling from Earth through the Solar System and 
 
 The full plan, including the roadmap, lives in the [design doc](https://claude.ai/code/artifact/c235450b-21cd-41a8-bc4b-b69ca4239c84).
 
-## Landing, walking and sky events (this code)
+## Star systems (this code)
+
+**Visit other stars and their planets.** Pick one from `Star systems…` (25 systems: Alpha Centauri, Proxima, Barnard's Star, Sirius, TRAPPIST-1, 55 Cancri, HD 189733 and more) or search any of the 5,991 known exoplanets or their 4,417 stars by name. In the ship, a planet or companion star is a destination like any other: X flies you there under its real gravity.
+
+- **Stars up close** (`src/render/starglobe.ts`). A star's surface is drawn at its true size, colour and brightness, in the same units as the Sun's, so the exposure that shows the Sun's surface shows any star's. Convection cells (granulation) are sized from the star's pressure scale height, which goes as T/g: 1,300 km for the Sun, a few hundred km on a red dwarf, a sizeable part of a red giant. Above about 7,000 K the convection zone thins out and the surface turns smooth (Sirius, Vega). Cool stars get starspots, and limb darkening strengthens as stars get cooler. The pattern is typical for such a star, not a map of it (the HUD says so).
+- **Binary stars on their measured orbits** (`src/core/systems.ts`, `src/core/kepler.ts`). Sirius A and B, Procyon A and B, Alpha Centauri A and B, 61 Cygni A and B, 70 Ophiuchi and Eta Cassiopeiae use the USNO Sixth Catalog of Orbits of Visual Binary Stars (ORB6: Bond et al. 2017 for Sirius, Akeson et al. 2021 for Alpha Centauri) with published masses. Each star circles the barycentre, which moves in a straight line set by the primary's catalogue position and motion. The white dwarfs Sirius B (25,369 K, 5,634 km) and Procyon B are drawn too.
+- **Exoplanets as worlds.** Every planet is placed on its orbit: period, size, eccentricity and argument of periastron from the NASA Exoplanet Archive's composite table, and its phase from the measured time of mid-transit or periastron, so a transiting planet crosses its star when it is seen to from Earth. The transit's impact parameter sets the orbit's tilt; an unmeasured tilt is drawn at 60° and the orbit's turn on the sky (never measured) at 0°. Planets missing a radius or mass get one from the Chen and Kipping (2017) mass-radius relation.
+- **Estimated looks** (`src/render/exoplanet.ts`). No exoplanet has been seen as more than a point, so each world's look is built from what is measured. Size, density and temperature make it a gas giant, ice giant, sub-Neptune, lava world, hot rock, temperate rock or ice world. Gas giants follow Sudarsky et al.'s (2000) classes, from ammonia clouds to the deep blue of alkali-metal atmospheres (HD 189733 b is measured to be blue). Planets close to their star keep one face to it. Light is physical: starlight from each star of the system in its colour, and thermal glow from a blackbody at the local temperature, which only shows on the hottest worlds (KELT-9 b, 55 Cancri e). The pattern comes from the planet's name, so it is the same every visit. The HUD lists what is measured and what is estimated.
+- **Gravity.** In the ship, a system's planets and companion stars pull on you with their masses, and you fly relative to whichever planet's sphere of influence you are in.
+- **Gate** (`tests/systems.test.ts`):
+  - The six binaries match ORB6's own ephemerides for 2025-2029 to 0.1° in position angle and 0.3% in separation, seen from the Sun in 3D.
+  - 61 Cygni B is where Gaia DR3 measured it relative to A in 2016.0 (31.59", 152.6°), to 0.15" and 0.3°.
+  - Each binary's barycentre moves in a straight line.
+  - At its catalogued time of mid-transit, every one of the 3,500+ transiting planets is in front of its star. 98% are within the star's disc as seen from the Sun, and all but circumbinary TIC 172900988 b within two stellar radii.
+  - Planets with a time of periastron are at periastron then.
+
+New URL parameter values: `focus` takes planets and companions (`?focus=TRAPPIST-1 e`, `?focus=Sirius B`). `scripts/system-check.mjs` flies the ship from Proxima to Proxima b and on to Alpha Centauri B in headless Chromium.
+
+### Limits
+
+- Exoplanet surfaces, colours and rotation are estimates. Only the orbit, size, mass and temperature are measured.
+- The orientation of an exoplanet's orbit on the sky is unknown (except for a few directly imaged ones), so all are drawn with the ascending node due north. Planets without a measured time of transit or periastron are placed at an arbitrary point on their orbit.
+- Light travel time isn't taken off: the systems are drawn as they look from Earth now.
+- Planets don't pull on each other, and binaries outside the six listed are drawn as separate catalogue stars without orbital motion.
+- Exoplanets have no terrain to land on and walk.
+
+## Landing, walking and sky events
 
 **Landing and walking.** Set the ship down on the Moon, Mars or Earth and press O (or `Out`) to step outside, or press `Walk here` near the ground anywhere with terrain (`?walk=1` starts on foot). You walk in first person at the true surface gravity.
 
@@ -155,9 +181,8 @@ New URL parameters: `sky=ra,dec` points the view at a sky position (degrees, cel
 ### Limits
 
 - Gaia stars fainter than G = 12 are included only within 100 pc, so the Milky Way shows as stars, not as its diffuse glow. Faint stars far from the Sun are missing when you fly out.
-- Binary and multiple stars are drawn as their catalogue entries, without orbital motion. Stars without a radial velocity move only across the sky.
+- Binary and multiple stars are drawn as their catalogue entries, without orbital motion (since the star systems work, six binaries move on their orbits). Stars without a radial velocity move only across the sky.
 - The dust map stops at 1,250 pc from the Sun, and from Earth stars beyond it get no extra extinction. Inside the box, the ray march takes 16 samples per star, so thin filaments are smoothed.
-- Exoplanet orbits are drawn edge-on as seen from Earth (true for transiting planets), because most orbits' orientations are unknown.
 - Nebulae are not drawn yet (added in milestone 5).
 
 ## Milestone 3: the Solar System
@@ -219,7 +244,7 @@ Views can be linked with URL parameters, for example `?focus=Earth&lat=36.075&lo
 ```sh
 npm install
 npm run dev          # http://localhost:5173
-npm test             # ephemeris, Horizons, orientation, rotation, moons, eclipse, satellites, jitter, time, sky, galaxy, 3D galaxy, black hole, flight, walking and events tests
+npm test             # ephemeris, Horizons, orientation, rotation, moons, eclipse, satellites, jitter, time, sky, star system, galaxy, 3D galaxy, black hole, flight, walking and events tests
 npm run build
 npm run screenshot   # renders reference views to screenshots/ (headless Chromium)
 ```
@@ -268,6 +293,7 @@ curl -L -o $DATA/edenhofer_mean_std_healpix.fits https://zenodo.org/records/1065
 (cd pipeline && python3 build_dust.py $DATA ../public/data)
 python3 pipeline/build_stars.py $DATA public/data --dust $DATA/dust-grid.npz
 python3 pipeline/make_sky_fixtures.py $DATA tests/fixtures/sky-reference.json
+python3 pipeline/build_systems.py $DATA public/data   # exoplanet orbits (NASA Exoplanet Archive), binary orbits (USNO ORB6); writes tests/fixtures/systems-reference.json
 
 # The Milky Way glow, galaxies, images and the microwave background
 python3 pipeline/build_milkyway.py public/data src/generated/milkyway.json
@@ -308,6 +334,7 @@ Tiles are geographic: level L has 2^(L+1) × 2^L tiles of 180/2^L degrees. Colou
 - Hipparcos (ESA 1997) and XHIP: An Extended Hipparcos Compilation (Anderson & Francis 2012); Tycho-2 (Høg et al. 2000), via VizieR (CDS, Strasbourg). Star names via the `d3-celestial` package.
 - 3D dust map of Edenhofer et al. (2024), Zenodo 10658339.
 - NASA Exoplanet Archive, Planetary Systems Composite Parameters (NASA Exoplanet Science Institute, Caltech/IPAC).
+- Sixth Catalog of Orbits of Visual Binary Stars (ORB6) and its ephemerides, US Naval Observatory (Hartkopf, Mason, Worley et al.): orbits of Sirius, Procyon, Alpha Centauri, 61 Cygni, 70 Ophiuchi and Eta Cassiopeiae; stellar masses and white dwarf parameters from the literature cited in pipeline/build_systems.py.
 - Stellarium modern sky culture constellation figures (GPL-2.0).
 - Pecaut & Mamajek (2013) stellar colour and temperature table; Riello et al. (2021) Gaia-to-Johnson transformations.
 - IAU WGCCRE 2015 report on cartographic coordinates and rotational elements (radii, poles, rotation), via NAIF pck00011.

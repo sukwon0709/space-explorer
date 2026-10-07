@@ -18,9 +18,12 @@ import { SmallBodies } from './render/smallbodies';
 import { StarField, makeSingleStar, type DustGrid } from './render/stars';
 import { Constellations, type ConstellationData } from './render/constellations';
 import { StarGlobe } from './render/starglobe';
+import { CATALOGUE_PRECISION, Systems } from './systems';
+import type { SystemsData } from './core/systems';
+import { SUN_SURFACE_BRIGHTNESS } from './render/sun';
 import { MilkyWayGlow } from './render/milkyway';
 import { icrsPcToGalactocentric } from './core/milkyway';
-import { DeepSky, GALAXY_ID } from './deepsky';
+import { DeepSky } from './deepsky';
 import { BlackHoles, type SStar } from './blackholes';
 import { EhtPanel, type EhtMeta } from './ui/ehtpanel';
 import { MPC_KM, type GalaxyIndex } from './core/galaxies';
@@ -124,7 +127,7 @@ function nearestSite(body: number, lon: number, lat: number): { name: string; di
 }
 
 async function main() {
-  const [ephemeris, orientation, starIndexRaw, namedStars, constellationData, dust, cloudTexture, satelliteSnapshot, smallBuffer, asteroidsBuffer, cometData, asteroidNames, saturnRings, galaxyIndex, galaxyBuffer, skyImages, sstarData, ehtMeta, galaxyModels] = await Promise.all([
+  const [ephemeris, orientation, starIndexRaw, namedStars, constellationData, dust, cloudTexture, satelliteSnapshot, smallBuffer, asteroidsBuffer, cometData, asteroidNames, saturnRings, galaxyIndex, galaxyBuffer, skyImages, sstarData, ehtMeta, galaxyModels, systemsData] = await Promise.all([
     Ephemeris.load(`${BASE}data/de440.bin`),
     Orientation.load(`${BASE}data/orientation.bin`),
     fetch(`${BASE}data/stars/index.json`).then((r) => r.json()),
@@ -144,6 +147,7 @@ async function main() {
     fetch(`${BASE}data/blackholes/sstars.json`).then((r) => r.json() as Promise<{ stars: SStar[] }>).then((j) => j.stars).catch(() => [] as SStar[]),
     fetch(`${BASE}data/blackholes/eht.json`).then((r) => r.json() as Promise<Record<string, EhtMeta>>).catch(() => ({}) as Record<string, EhtMeta>),
     fetch(`${BASE}data/galaxies/models.json`).then((r) => r.json() as Promise<{ models: GalaxyModelSpec[] }>).then((j) => j.models).catch(() => [] as GalaxyModelSpec[]),
+    fetch(`${BASE}data/stars/systems.json`).then((r) => r.json() as Promise<SystemsData>).catch(() => ({ planets: {}, hosts: {}, binaries: [], featured: [] }) as SystemsData),
   ]);
   if (smallBuffer) ephemeris.add(smallBuffer);
   const asteroids: AsteroidSet | undefined = asteroidsBuffer ? parseAsteroids(asteroidsBuffer) : undefined;
@@ -183,6 +187,10 @@ async function main() {
   if (constellations) scene.add(constellations.lines);
   const starGlobe = new StarGlobe();
   scene.add(starGlobe.group);
+  // Other star systems: binary companions and exoplanets on their orbits.
+  const sys = new Systems(namedStars, systemsData, STAR_ID, stars.material, starMass);
+  scene.add(sys.group);
+  const teffCode = (t: number) => (255 * Math.log(t / starIndex.teff[0])) / Math.log(starIndex.teff[1]);
   const glow = new MilkyWayGlow(dust);
   scene.add(glow.composite);
   const deep = new DeepSky(
@@ -289,8 +297,11 @@ async function main() {
   });
   for (const t of deep.targets) targets.set(t.id, { id: t.id, name: t.name, kind: t.kind, radius: t.radius });
   for (const t of bhs.targets) targets.set(t.id, { id: t.id, name: t.name, kind: t.kind, radius: t.radius });
+  for (const t of sys.targets) targets.set(t.id, { id: t.id, name: t.name, kind: t.kind, radius: t.radius });
   const isHole = (id: number) => bhs.has(id);
-  const isStar = (id: number) => id >= STAR_ID && id < GALAXY_ID;
+  const isStar = (id: number) => id >= STAR_ID && id < STAR_ID + namedStars.length;
+  /** A companion star or exoplanet (systems.ts). */
+  const isSys = (id: number) => sys.has(id);
   const isDeep = (id: number) => deep.has(id);
   const starOf = (id: number) => namedStars[id - STAR_ID];
   const helio: Vec3 = [0, 0, 0];
@@ -298,11 +309,7 @@ async function main() {
   const positionOf = (id: number, out: Vec3 = [0, 0, 0]): Vec3 => {
     if (isDeep(id)) return deep.position(id, out);
     if (isHole(id)) return bhs.position(id, out);
-    if (isStar(id)) {
-      namedStarPosition(starOf(id), yearsSinceEpoch(clock.tdb), starPc);
-      for (let k = 0; k < 3; k++) starPc[k] *= PC_KM;
-      return icrfToScene(starPc, out);
-    }
+    if (isStar(id) || isSys(id)) return sys.position(id, clock.tdb, out);
     const orbit = smallOrbits.get(id);
     if (!orbit) {
       const p = system.position(id);
@@ -384,8 +391,10 @@ async function main() {
   };
   /** For other targets: an orbit angle 35 degrees off the Sun direction, slightly above. */
   const sunlitView = (id: number): [number, number] => {
-    if (id === 10 || isStar(id)) return [-0.3, 0.9];
-    const d = sub(system.position(10), positionOf(id), [0, 0, 0]);
+    if (id === 10 || isStar(id) || (isSys(id) && !sys.isPlanet(id))) return [-0.3, 0.9];
+    // An exoplanet: from the side its star lights.
+    const light = isSys(id) ? positionOf(STAR_ID + sys.planet(id).host) : system.position(10);
+    const d = sub(light, positionOf(id), [0, 0, 0]);
     return [-(Math.atan2(d[0], d[2]) + 0.6), 0.2];
   };
   const viewFor = (id: number) => {
@@ -395,7 +404,7 @@ async function main() {
     if (isHole(id)) return { ...bhs.viewFor(id), anchor: undefined };
     const [yaw, pitch] = sunlitView(id);
     const body = findBody(id);
-    const distance = isStar(id) ? target.radius * 6 : !body ? 3e6 : RINGS[id] && id === 699 ? target.radius * 7 : target.radius * 4;
+    const distance = isStar(id) || (isSys(id) && !sys.isPlanet(id)) ? target.radius * 6 : isSys(id) ? target.radius * 4 : !body ? 3e6 : RINGS[id] && id === 699 ? target.radius * 7 : target.radius * 4;
     return { distance, yaw, pitch, anchor: undefined };
   };
 
@@ -523,12 +532,15 @@ async function main() {
   });
   for (const t of deep.targets) for (const alias of t.aliases) if (!byName.has(alias.toLowerCase())) byName.set(alias.toLowerCase(), t.id);
   for (const t of bhs.targets) for (const alias of t.aliases) if (!byName.has(alias.toLowerCase())) byName.set(alias.toLowerCase(), t.id);
+  for (const t of sys.targets) for (const alias of t.aliases) if (!byName.has(alias.toLowerCase())) byName.set(alias.toLowerCase(), t.id);
+  for (const f of sys.model.featured) if (!byName.has(f.title.toLowerCase())) byName.set(f.title.toLowerCase(), STAR_ID + f.host);
   const deepById = new Map(deep.targets.map((t) => [t.id, t]));
   options.append(...[...targets.values()].map((t) => {
     const o = document.createElement('option');
     o.value = t.name;
     if (isDeep(t.id)) o.label = [...(deepById.get(t.id)?.aliases.slice(0, 2) ?? []), t.kind].join(' · ');
     else if (isHole(t.id)) o.label = 'black hole';
+    else if (isSys(t.id)) o.label = sys.isPlanet(t.id) ? `planet of ${namedStars[sys.planet(t.id).host].name} · ${sys.planet(t.id).kind}` : t.kind;
     else if (isStar(t.id)) {
       const star = starOf(t.id);
       o.label = [star.desig, star.host, star.planets ? `${star.planets.length} planet${star.planets.length > 1 ? 's' : ''}` : ''].filter(Boolean).join(' · ') || 'star';
@@ -579,6 +591,7 @@ async function main() {
   search.addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });
 
   const starLabels = new Map<number, HTMLElement>();
+  const sysLabels = new Map<number, HTMLElement>();
   const deepLabels = new Map<number, HTMLElement>();
   const makeStarLabel = (k: number) => {
     const label = document.createElement('div');
@@ -821,6 +834,24 @@ async function main() {
     tourSelect.value = '';
     if (tour) tours.start(tour);
   });
+  // ---- star systems -------------------------------------------------------------
+  const systemSelect = document.getElementById('systems') as HTMLSelectElement;
+  sys.model.featured.forEach((f, k) => {
+    const o = document.createElement('option');
+    o.value = String(k);
+    o.textContent = f.title;
+    o.title = f.note;
+    systemSelect.append(o);
+  });
+  systemSelect.addEventListener('change', () => {
+    const f = sys.model.featured[Number(systemSelect.value)];
+    systemSelect.value = '';
+    systemSelect.blur();
+    if (!f) return;
+    flyTo(STAR_ID + f.host);
+    hud.say(`${f.title}: ${f.note}`, 8);
+  });
+
   // ?tour=1&step=3 starts a tour (numbered from 1) at a step.
   if (params.has('tour')) {
     const tour = TOURS[Number(params.get('tour')) - 1];
@@ -834,8 +865,6 @@ async function main() {
   const solar = new SolarGravity(ephemeris);
   const scratch: Vec3 = [0, 0, 0];
   const zero = (out: Vec3) => { out[0] = out[1] = out[2] = 0; return out; };
-  /** Stars' masses from their size and temperature (main-sequence mass-luminosity, M ~ L^(1/3.5)). */
-  const starMass = (star: NamedStar) => Math.min(60, Math.max(0.08, Math.pow(star.radius ** 2 * (star.teff / 5772) ** 4, 1 / 3.5)));
   const holeHorizon = (id: number) => horizon(bhs.hole(id).spin) * bhs.hole(id).mass * SUN_GM_KM;
   const isSmall = (id: number) => smallOrbits.has(id);
   /** A small body's position at any time (positionOf only knows the clock's time). */
@@ -851,17 +880,13 @@ async function main() {
   const flightWorld: FlightWorld = {
     position(id, tdb, out = [0, 0, 0]) {
       if (findBody(id)) return solar.position(id, tdb, out);
-      if (isStar(id)) {
-        namedStarPosition(starOf(id), yearsSinceEpoch(tdb), starPc);
-        for (let k = 0; k < 3; k++) starPc[k] *= PC_KM;
-        return icrfToScene(starPc, out);
-      }
+      if (isStar(id) || isSys(id)) return sys.position(id, tdb, out);
       if (isSmall(id)) return smallAt(id, tdb, out);
       return positionOf(id, out); // galaxies and black holes stay put
     },
     velocity(id, tdb, out = [0, 0, 0]) {
       if (findBody(id)) return solar.velocity(id, tdb, out);
-      if (isStar(id)) return icrfToScene(starOf(id).vel, out);
+      if (isStar(id) || isSys(id)) return sys.velocity(id, tdb, out);
       if (isSmall(id)) {
         const a = smallAt(id, tdb + 30, [0, 0, 0]), b = smallAt(id, tdb - 30, [0, 0, 0]);
         for (let k = 0; k < 3; k++) out[k] = (a[k] - b[k]) / 60;
@@ -870,6 +895,7 @@ async function main() {
       return zero(out);
     },
     acceleration(id, tdb, out = [0, 0, 0]) {
+      if (isStar(id) || isSys(id)) return sys.acceleration(id, tdb, out);
       return findBody(id) ? solar.acceleration(id, tdb, out) : zero(out);
     },
     sources(abs, tdb) {
@@ -879,8 +905,9 @@ async function main() {
       namedStars.forEach((star, k) => {
         namedStarPosition(star, years, starPc);
         const d = Math.hypot(starPc[0] * PC_KM - icrf[0], starPc[1] * PC_KM - icrf[1], starPc[2] * PC_KM - icrf[2]);
-        if (d < 0.05 * PC_KM) list.push({ id: STAR_ID + k, gm: starMass(star) * GM[10] });
+        if (d < 0.05 * PC_KM) list.push({ id: STAR_ID + k, gm: sys.model.massOf(k) * GM[10] });
       });
+      sys.sources(abs, list);
       for (const t of bhs.targets) {
         const p = bhs.position(t.id, scratch);
         if (Math.hypot(p[0] - abs[0], p[1] - abs[1], p[2] - abs[2]) < 10 * PC_KM) {
@@ -898,6 +925,7 @@ async function main() {
       const body = findBody(id);
       if (body) return length(rel) - body.radius[0];
       if (isStar(id)) return length(rel) - starOf(id).radius * SOLAR_RADIUS;
+      if (isSys(id)) return length(rel) - targets.get(id)!.radius;
       return NaN;
     },
     spin(id, tdb) {
@@ -940,15 +968,46 @@ async function main() {
     if (best >= 0) return best;
     const years = yearsSinceEpoch(tdb);
     const icrf = sceneToIcrf(abs, [0, 0, 0]);
+    // Among the stars in reach, the one pulling hardest (in a binary, the nearer star).
+    let pull = 0;
     namedStars.forEach((star, k) => {
       namedStarPosition(star, years, starPc);
       const d = Math.hypot(starPc[0] * PC_KM - icrf[0], starPc[1] * PC_KM - icrf[1], starPc[2] * PC_KM - icrf[2]);
-      const infl = 2e4 * AU * Math.sqrt(starMass(star));
-      if (d < infl && infl < bestSize) {
-        best = STAR_ID + k;
-        bestSize = infl;
+      const m = sys.model.massOf(k);
+      const infl = 2e4 * AU * Math.sqrt(m);
+      if (d < infl) {
+        const p = sys.position(STAR_ID + k, tdb, scratch);
+        const g = m / Math.max(1, (p[0] - abs[0]) ** 2 + (p[1] - abs[1]) ** 2 + (p[2] - abs[2]) ** 2);
+        if (g > pull) {
+          best = STAR_ID + k;
+          bestSize = infl;
+          pull = g;
+        }
       }
     });
+    if (best >= 0) {
+      // A white dwarf companion, or a planet whose sphere of influence the ship is in.
+      const primary = sys.systemOf(best);
+      if (primary >= 0) {
+        for (const id of sys.starsOf(primary)) {
+          if (!isSys(id)) continue;
+          const p = sys.position(id, tdb, scratch);
+          const g = sys.starLook(id).mass / Math.max(1, (p[0] - abs[0]) ** 2 + (p[1] - abs[1]) ** 2 + (p[2] - abs[2]) ** 2);
+          if (g > pull) {
+            best = id;
+            pull = g;
+          }
+        }
+        for (const id of sys.planetsIn(primary)) {
+          const p = sys.position(id, tdb, scratch);
+          const infl = sys.influence(id);
+          if (Math.hypot(p[0] - abs[0], p[1] - abs[1], p[2] - abs[2]) < infl && infl < bestSize) {
+            best = id;
+            bestSize = infl;
+          }
+        }
+      }
+    }
     for (const t of bhs.targets) {
       const p = bhs.position(t.id, scratch);
       const infl = Math.min(3 * PC_KM, 2e4 * AU * Math.sqrt(bhs.hole(t.id).mass));
@@ -985,16 +1044,30 @@ async function main() {
     const years = yearsSinceEpoch(tdb);
     namedStars.forEach((star, k) => {
       const r = star.radius * SOLAR_RADIUS;
+      if (sys.model.binaryOf.has(k)) {
+        list.push({ id: STAR_ID + k, pos: sys.position(STAR_ID + k, tdb), radius: r, arrive: 10 * r });
+        return;
+      }
       namedStarPosition(star, years, starPc);
       for (let c = 0; c < 3; c++) starPc[c] *= PC_KM;
       list.push({ id: STAR_ID + k, pos: icrfToScene(starPc), radius: r, arrive: 10 * r });
     });
+    // The companions and planets of the systems the ship is in and is heading for.
+    const primaries = new Set([ship ? sys.systemOf(ship.ref) : -1, flight.target !== undefined ? sys.systemOf(flight.target) : -1]);
+    for (const primary of primaries) {
+      if (primary < 0) continue;
+      for (const id of [...sys.starsOf(primary), ...sys.planetsIn(primary)]) {
+        if (!isSys(id)) continue;
+        const r = targets.get(id)!.radius;
+        list.push({ id, pos: sys.position(id, tdb), radius: r, arrive: sys.isPlanet(id) ? 3 * r : 10 * r });
+      }
+    }
     for (const t of bhs.targets) {
       const rg = bhs.hole(t.id).mass * SUN_GM_KM;
       list.push({ id: t.id, pos: bhs.position(t.id), radius: holeHorizon(t.id), arrive: 25 * rg });
     }
     for (const t of deep.targets) if (t.kind === 'galaxy') list.push({ id: t.id, pos: deepAt(t.id), radius: t.radius, arrive: 0, soft: true });
-    if (flight.target !== undefined && !findBody(flight.target) && !isStar(flight.target) && !isHole(flight.target)) {
+    if (flight.target !== undefined && !findBody(flight.target) && !isStar(flight.target) && !isHole(flight.target) && !isSys(flight.target)) {
       // Galaxies, nebulae, asteroids and comets: stop at the usual viewing distance.
       const id = flight.target;
       const pos = isSmall(id) ? smallAt(id, tdb, [0, 0, 0]) : isDeep(id) ? deepAt(id) : positionOf(id);
@@ -1764,14 +1837,14 @@ async function main() {
       attr.needsUpdate = true;
     }
     if (constellations) constellations.opacity = layers.constellations ? 0.6 * (1 - 0.9 * daylight) : 0;
-    if (isStar(rig.focus) && rig.distance < focus.radius * 2e5) {
+    // Star systems (binaries, planets) draw their own members; other stars up close get a globe.
+    const sysHide = sys.update(eye, rig.focus, clock.tdb, system.exposure, ppr, teffCode);
+    if (isStar(rig.focus) && sys.active < 0 && rig.distance < focus.radius * 2e5) {
       const p = positionOf(rig.focus);
-      const fromEarth = sub(p, system.position(399), [0, 0, 0]);
-      const star = starOf(rig.focus);
-      starGlobe.update(star.name, sub(p, eye, [0, 0, 0]), focus.radius, star.teff, star.planets, fromEarth);
+      starGlobe.update(sub(p, eye, [0, 0, 0]), sys.starLook(rig.focus), system.exposure, clock.tdb, sys.starSpin(rig.focus, clock.tdb));
     } else starGlobe.hide();
     // Up close the globe is the star: drop its point (and anything as near) from the star field.
-    stars.hideWithin = isStar(rig.focus) && rig.distance < focus.radius * 200 ? (1.5 * rig.distance) / PC_KM : 0;
+    stars.hideWithin = Math.max(sysHide, isStar(rig.focus) && rig.distance < focus.radius * 200 ? (1.5 * rig.distance + CATALOGUE_PRECISION * Math.hypot(...positionOf(rig.focus))) / PC_KM : 0);
     bhs.radio = layers.radio;
     stars.hideWithin = Math.max(stars.hideWithin, bhs.update(eye, rig.focus, holeRel, clock.tdb));
 
@@ -1782,6 +1855,17 @@ async function main() {
     const fromSun = length(sub(ship ? eye : positionOf(rig.focus), sunPos, [0, 0, 0]));
     const sunUpClose = rig.focus === 10 && (!ship || rig.distance < 30 * SUN_RADIUS);
     let exposureTarget = sunUpClose ? 0.6 / (7 * 46200) : Math.min(2500, Math.max(0.15, (fromSun / AU) ** 2));
+    // Another star's surface, shown like the Sun's; in its system, the light of its stars
+    // where the eye is (or on the planet in view).
+    const sysFocus = sys.systemOf(rig.focus);
+    const near30 = rig.distance < 30 * focus.radius;
+    if ((isStar(rig.focus) || (isSys(rig.focus) && !sys.isPlanet(rig.focus))) && near30) {
+      exposureTarget = 0.6 / (7 * SUN_SURFACE_BRIGHTNESS * sys.starLook(rig.focus).surface);
+    } else if (sysFocus >= 0 && sys.active >= 0) {
+      const onPlanet = sys.isPlanet(rig.focus) && near30;
+      exposureTarget = Math.min(2500, Math.max(1e-5, 1 / sys.fluxAt(sysFocus, onPlanet ? positionOf(rig.focus) : eye, clock.tdb)));
+      if (onPlanet) exposureTarget *= Math.min(2, Math.max(0.12, 0.09 / sys.planet(rig.focus).albedo));
+    }
     // Like the eye, adapt to the body in view: bright clouds and ice get less exposure,
     // dark rock more (Earth and the Moon keep the exposure their maps were made for).
     const focusBody = findBody(rig.focus);
@@ -1815,6 +1899,8 @@ async function main() {
     let altitude = Infinity;
     for (const [id, sf] of surfaces) altitude = Math.min(altitude, bodyToGeodetic(sf.shape, bodyVector(sf, sub(eye, system.position(id), rel)))[2]);
     system.orbitOpacity = skyAim ? 0 : smoothstep(100, 3000, altitude);
+    // A planet's orbit line cuts across the view close up: fade it under 300 radii.
+    sys.orbitOpacity = sys.isPlanet(rig.focus) ? smoothstep(30, 300, rig.distance / focus.radius) : 1;
     system.placeRelativeTo(eye, hidden, sunVisible, daylight);
     // Asteroids and comets: a map layer, shown when the view is wide enough to see orbits.
     smallBodies?.update(clock.tdb / 86400, sunPos, eye, Math.max(smoothstep(2e6, 2e7, rig.distance), rig.focus >= ASTEROID_ID && rig.focus < STAR_ID ? 1 : 0));
@@ -1869,7 +1955,14 @@ async function main() {
     };
     // Sky labels go with the sky: under the ground or in a daylit sky they are hidden.
     const skyDir: Vec3 = [0, 0, 0];
-    const skyHidden = (p: Vec3) => daylight > 0.6 || hiddenBehind(-1, sub(p, eye, skyDir));
+    // A star or exoplanet in view hides what is behind it, like the solar system's globes.
+    const focusCentre = isStar(rig.focus) || isSys(rig.focus) ? sub(positionOf(rig.focus), eye, [0, 0, 0]) : undefined;
+    const behindFocus = (d: Vec3) => {
+      if (!focusCentre) return false;
+      const along = dot(focusCentre, d) / length(d);
+      return along > 0 && along < length(d) && dot(focusCentre, focusCentre) - along * along < focus.radius ** 2;
+    };
+    const skyHidden = (p: Vec3) => daylight > 0.6 || hiddenBehind(-1, sub(p, eye, skyDir)) || behindFocus(skyDir);
     const smallFocus = rig.focus >= ASTEROID_ID && !isHole(rig.focus);
     focusLabel.textContent = smallFocus ? focus.name : '';
     if (smallFocus) place(rig.focus, focusLabel, positionOf(rig.focus), false);
@@ -1900,6 +1993,8 @@ async function main() {
     if (layers.names || layers.planets) {
       namedStars.forEach((star, k) => {
         if (STAR_ID + k === rig.focus) return;
+        // The system in view labels its own stars where their orbits put them.
+        if (sys.active >= 0 && sys.systemOf(STAR_ID + k) === sys.active) return;
         namedStarPosition(star, years, starPc);
         const d = Math.hypot(starPc[0] - camPc[0], starPc[1] - camPc[1], starPc[2] - camPc[2]);
         const m = apparentMagnitude(star.M, d, star.av);
@@ -1924,6 +2019,27 @@ async function main() {
       shownStars.add(k);
     }
     for (const [k, label] of starLabels) if (!shownStars.has(k)) label.style.display = 'none';
+    // The stars and planets of the system in view.
+    const shownSys = new Set<number>();
+    if (layers.names) {
+      for (const m of sys.shown) {
+        if (m.id === rig.focus) continue;
+        let label = sysLabels.get(m.id);
+        if (!label) {
+          label = document.createElement('div');
+          label.className = sys.isPlanet(m.id) ? 'label planet' : 'label skystar';
+          label.textContent = m.name;
+          const id = m.id;
+          label.addEventListener('click', () => flyTo(id));
+          labelLayer.append(label);
+          sysLabels.set(m.id, label);
+        }
+        const toLabel = sub(m.pos, eye, [0, 0, 0]);
+        place(m.id, label, m.pos, length(toLabel) < targets.get(m.id)!.radius * 2.5 || behindFocus(toLabel));
+        shownSys.add(m.id);
+      }
+    }
+    for (const [id, label] of sysLabels) if (!shownSys.has(id)) label.style.display = 'none';
     // Galaxies: the brightest named ones in view, and clusters seen from outside.
     const shownDeep = new Set<number>();
     const deepLabel = (id: number, className: string) => {
@@ -2024,6 +2140,8 @@ async function main() {
       lines.push(...deep.describe(rig.focus, camMpc, rig.distance));
     } else if (holeRel) {
       lines.push(...bhs.describe(rig.focus, holeRel, clock.tdb));
+    } else if (isSys(rig.focus)) {
+      lines.push(...sys.describe(rig.focus, eye, clock.tdb));
     } else if (isStar(rig.focus)) {
       const star = starOf(rig.focus);
       const p = namedStarPosition(star, years, [0, 0, 0]);
@@ -2034,6 +2152,9 @@ async function main() {
       lines.push(`Magnitude ${star.V.toFixed(2)} from Earth, ${apparentMagnitude(star.M, fromEye, star.av).toFixed(1)} from here`);
       lines.push(`${star.teff.toLocaleString('en-US')} K, ${star.radius < 10 ? star.radius.toFixed(2) : star.radius.toFixed(0)} × the Sun's radius`);
       lines.push(`Camera ${formatDistance(rig.distance)} from its centre`);
+      const binary = sys.binaryLine(rig.focus - STAR_ID, clock.tdb);
+      if (binary) lines.push(binary);
+      if (star.teff < 7400 && rig.distance < 30 * focus.radius) lines.push('Surface: granulation sized from its temperature and gravity; spots typical, not observed');
       if (star.planets) {
         lines.push(`${star.planets.length} known planet${star.planets.length > 1 ? 's' : ''}:`);
         for (const pl of star.planets.slice(0, 8)) lines.push(`  ${pl.name}: ${describePlanet(pl)}`);
@@ -2046,7 +2167,7 @@ async function main() {
     } else {
       lines.push(`Camera altitude ${formatDistance(rig.distance - focus.radius)}`);
     }
-    if (focus.id !== 10 && !isStar(focus.id) && !isDeep(focus.id) && !isHole(focus.id)) {
+    if (focus.id !== 10 && !isStar(focus.id) && !isDeep(focus.id) && !isHole(focus.id) && !isSys(focus.id)) {
       lines.push(`${(fromSun / AU).toFixed(4)} AU from the Sun`);
       lines.push(`Sunlight takes ${formatLightTime(fromSun)} to arrive`);
     }
@@ -2067,6 +2188,11 @@ async function main() {
     requestAnimationFrame(frame);
   };
   requestAnimationFrame(frame);
+}
+
+/** Stars' masses from their size and temperature (main-sequence mass-luminosity, M ~ L^(1/3.5)). */
+function starMass(star: NamedStar): number {
+  return Math.min(60, Math.max(0.08, Math.pow(star.radius ** 2 * (star.teff / 5772) ** 4, 1 / 3.5)));
 }
 
 /** Label priority: the Sun and planets first, then dwarf planets, moons, asteroids. */
