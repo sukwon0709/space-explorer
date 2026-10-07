@@ -13,6 +13,8 @@ import { AU, SUN_RADIUS, SolarSystem } from './render/world';
 import { CameraRig, SCENE_BASIS, type Anchor, type Frame } from './render/camera';
 import { Globe, type GlobeFrame, type SurfaceKind } from './render/globe';
 import { EarthSky } from './render/sky';
+import { ThickSky, TITAN_AIR, VENUS_AIR, belowDeck, diffuseLight, tauAbove, veil, type ThickAirParams } from './render/thickair';
+import { reliefHeight, type ReliefMap, type ReliefParams } from './core/relief';
 import { discOverlap } from './render/shadow';
 import { SmallBodies } from './render/smallbodies';
 import { albedoScale } from './render/planets';
@@ -65,7 +67,25 @@ const DIFFUSE_GAIN = 3;
 /** Mars tiles store twice the surface's normal albedo (pipeline/build_surfaces.py). */
 const MARS_ALBEDO_SCALE = 0.5;
 /** Worlds with terrain tiles besides Earth, the Moon and Mars (pipeline/build_worlds.py). */
-const WORLDS = (manifest as unknown as { worlds?: { body: number; name: string; radius: number; mean: Vec3 }[] }).worlds ?? [];
+interface WorldInfo {
+  body: number;
+  name: string;
+  radius: number;
+  mean: Vec3;
+  /** Surface albedo and colour where the body's own are its clouds' (Venus, Titan). */
+  albedo?: number;
+  color?: string;
+  atmosphere?: 'venus' | 'titan';
+  /** A relief map (public/data/relief) steers computed detail (relief.ts). */
+  relief?: boolean;
+}
+const WORLDS = (manifest as unknown as { worlds?: WorldInfo[] }).worlds ?? [];
+const THICK_AIR = { venus: VENUS_AIR, titan: TITAN_AIR };
+/** Computed relief: longest wavelength (about twice the elevation model's real resolution) and dunes. */
+const RELIEF: Record<string, Omit<ReliefParams, 'radius'>> = {
+  venus: { maxWavelength: 16 },
+  titan: { maxWavelength: 24, dunes: { spacing: 3, height: 0.1 } },
+};
 /** A world's terrain replaces its plain globe once it is this many pixels across. */
 const TERRAIN_PIXELS = 48;
 
@@ -74,7 +94,11 @@ interface Surface {
   shape: Shape;
   /** Body-fixed to scene rotation for the current frame. */
   bodyToScene: Float64Array;
-  sky?: EarthSky;
+  sky?: EarthSky | ThickSky;
+  /** A thick atmosphere: the ground shows only from below its deck. */
+  air?: ThickAirParams;
+  /** Ground albedo for exposure, where the body's own albedo is its clouds'. */
+  albedo?: number;
 }
 
 interface MapInfo {
@@ -120,6 +144,12 @@ const SITES: Site[] = [
   // Perseverance's landing site, Octavia E. Butler Landing (NASA/JPL).
   { name: 'Jezero crater (Perseverance)', aliases: ['jezero', 'jezero crater', 'perseverance', 'octavia e. butler landing'], body: 499, lat: 18.4447, lon: 77.4508, dist: 0.25, heading: 280, tilt: 18 },
   { name: 'Grand Canyon (Mather Point)', aliases: ['grand canyon', 'mather point'], body: 399, lat: 36.0618, lon: -112.1076, dist: 0.3, heading: 0, tilt: 10 },
+  // Landers on the worlds with thick atmospheres: Venera 13 and 14 (7.55 S 303.69 E,
+  // 13.05 S 310.19 E; Basilevsky et al. 1985) and Huygens (10.573 S 192.335 W; Karkoschka
+  // et al. 2016).
+  { name: 'Venera 13 landing site (Venus)', aliases: ['venera 13', 'venera13', 'venera'], body: 299, lat: -7.55, lon: -56.31, dist: 0.05, heading: 0, tilt: 8 },
+  { name: 'Venera 14 landing site (Venus)', aliases: ['venera 14', 'venera14'], body: 299, lat: -13.05, lon: -49.81, dist: 0.05, heading: 0, tilt: 8 },
+  { name: 'Huygens landing site (Titan)', aliases: ['huygens', 'huygens landing site'], body: 606, lat: -10.573, lon: 167.665, dist: 0.05, heading: 90, tilt: 8 },
 ];
 
 /**
@@ -279,17 +309,35 @@ async function main() {
     [399, WGS84, 'earth', [1, 1, 1]],
     [301, MOON_SPHERE, 'airless', [0.4, 0.4, 0.4]],
     [499, MARS_SPHERE, 'mars', [MARS_ALBEDO_SCALE, MARS_ALBEDO_SCALE, MARS_ALBEDO_SCALE]],
-    ...WORLDS.map((w): [number, Shape, SurfaceKind, Vec3] => [w.body, { a: w.radius, b: w.radius }, 'airless', albedoScale(bodyById(w.body), w.mean)]),
+    ...WORLDS.map((w): [number, Shape, SurfaceKind, Vec3] => {
+      const body = bodyById(w.body);
+      const ground = w.albedo !== undefined ? { ...body, albedo: w.albedo, color: w.color ?? body.color } : body;
+      return [w.body, { a: w.radius, b: w.radius }, w.atmosphere ? 'thick' : 'airless', albedoScale(ground, w.mean)];
+    }),
   ];
   for (const [id, shape, kind, albedo] of terrain) {
     if (!store.hasBody(id) || !rotationAt(id, clock.tdb, new Float64Array(9))) continue;
-    const globe = new Globe(id, shape, store, kind);
+    const world = WORLDS.find((w) => w.body === id);
+    const air = world?.atmosphere ? THICK_AIR[world.atmosphere] : undefined;
+    let relief: ((lon: number, lat: number, spacing: number) => number) | undefined;
+    let reliefReady: Promise<unknown> | undefined;
+    if (world?.relief && RELIEF[world.name]) {
+      // The map is small; tiles wait for it (or build without relief if it fails).
+      let map: ReliefMap | undefined;
+      const params: ReliefParams = { radius: world.radius, ...RELIEF[world.name] };
+      reliefReady = loadReliefMap(`${BASE}data/relief/${world.name}.png`).then((m) => (map = m)).catch((err) => console.warn(`relief ${world.name}:`, err));
+      relief = (lon, lat, spacing) => (map ? reliefHeight(map, params, lon, lat, spacing) : 0);
+    }
+    const globe = new Globe(id, shape, store, kind, { air, relief, reliefReady });
     globe.uniforms.uAlbedoScale.value.set(...albedo);
     // Close-up grain on bare rock; Earth's ground is too varied for one texture.
     globe.uniforms.uDetail.value = kind === 'earth' ? 0 : 1;
     if (id === 301) globe.uniforms.uEclTint.value.set(0.02, 0.006, 0.002);
-    const surface: Surface = { globe, shape, bodyToScene: new Float64Array(9) };
-    if (kind !== 'airless') {
+    const surface: Surface = { globe, shape, bodyToScene: new Float64Array(9), air, albedo: world?.albedo };
+    if (air) {
+      surface.sky = new ThickSky(air, globe.uniforms);
+      scene.add(surface.sky.group);
+    } else if (kind !== 'airless') {
       surface.sky = new EarthSky(globe, kind === 'earth' ? cloudTexture : undefined);
       scene.add(surface.sky.group);
     }
@@ -1666,6 +1714,8 @@ async function main() {
   const sunScene: Vec3 = [0, 0, 0];
   let last = performance.now() / 1000;
   let frameNumber = 0;
+  /** The camera under Venus's clouds or Titan's haze, this frame. */
+  let underAir: { air: ThickAirParams; h: number; mu0: number; veil: number; albedo: number } | undefined;
   let walkPending = params.get('walk') === '1';
   let lastPending = -1;
   const startedAt = performance.now() / 1000;
@@ -1827,14 +1877,17 @@ async function main() {
     frustum.setFromProjectionMatrix(projView.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
     const ppr = pixelsPerRadian();
     let daylight = 0;
+    underAir = undefined;
     for (const [id, s] of surfaces) {
       const centre = system.position(id);
       const centerRel = sub(centre, eye, [0, 0, 0]);
       // The other worlds draw as terrain only once they are big enough on screen to
       // need it; until then their plain globe (planets.ts) stands in and no tiles load.
+      // Venus and Titan show their ground only from under their clouds and haze.
       if (!hidden.has(id) || WORLD_IDS.has(id)) {
-        const big = system.available(id) && (s.shape.a / length(centerRel)) * ppr > TERRAIN_PIXELS / 2;
+        const big = system.available(id) && (s.shape.a / length(centerRel)) * ppr > TERRAIN_PIXELS / 2 && (!s.air || belowDeck(s.air, bodyVector(s, [-centerRel[0], -centerRel[1], -centerRel[2]])));
         s.globe.group.visible = big;
+        if (s.air && s.sky) s.sky.group.visible = big;
         if (big) hidden.add(id);
         else {
           hidden.delete(id);
@@ -1858,7 +1911,16 @@ async function main() {
       const f: GlobeFrame = { eyeBody, centerRel, bodyToScene: s.bodyToScene, sunBody: [sunBody[0] / len, sunBody[1] / len, sunBody[2] / len], pixelsPerRadian: ppr, frame: frameNumber, frustum };
       s.globe.update(f);
       s.sky?.update(f);
-      if (s.sky) {
+      if (s.air) {
+        // Under the deck the sky is the cloud's or haze's own glow: no stars, and the
+        // Sun's disc is only as bright as the direct beam that gets through.
+        const r = length(eyeBody);
+        const h = r - s.air.radius;
+        const mu0 = (eyeBody[0] * f.sunBody[0] + eyeBody[1] * f.sunBody[1] + eyeBody[2] * f.sunBody[2]) / r;
+        const v = veil(s.air, h);
+        daylight = Math.max(daylight, v);
+        underAir = { air: s.air, h, mu0, veil: v, albedo: s.albedo ?? 0.1 };
+      } else if (s.sky) {
         // In the daytime sky the eye adapts to the bright sky and the stars disappear;
         // in totality the sky goes dark and they come out.
         const altitude = bodyToGeodetic(s.shape, eyeBody)[2];
@@ -1944,6 +2006,14 @@ async function main() {
     if (focusBody && (!surfaces.has(focusBody.id) || WORLD_IDS.has(focusBody.id)) && focusBody.id !== 10 && (!ship || rig.distance < 30 * focusBody.radius[0])) {
       exposureTarget *= Math.min(2, Math.max(0.2, 0.11 / focusBody.albedo));
     }
+    // Under Venus's clouds or Titan's haze the eye adapts to the dim light there, and to
+    // the ground's own albedo rather than the clouds'.
+    if (underAir && (!ship || rig.distance < 30 * (focusBody?.radius[0] ?? Infinity))) {
+      const light = Math.max(1e-4, diffuseLight(underAir.air, underAir.h, Math.max(underAir.mu0, 0.05)));
+      const own = focusBody ? Math.min(2, Math.max(0.2, 0.11 / focusBody.albedo)) : 1;
+      const under = (Math.min(2, Math.max(0.2, 0.11 / underAir.albedo)) / own) * (0.06 / light);
+      exposureTarget *= Math.exp(underAir.veil * Math.log(under));
+    }
     // In another body's shadow (totality, a lunar eclipse) the eye adapts to the dark.
     exposureTarget *= 1 + 12 * (1 - Math.min(1, sunVisibleOthers * 30));
     // A close-up of the Sun (a transit, the partial phases of an eclipse) is seen through a
@@ -1973,7 +2043,13 @@ async function main() {
     system.orbitOpacity = skyAim ? 0 : smoothstep(100, 3000, altitude);
     // A planet's orbit line cuts across the view close up: fade it under 300 radii.
     sys.orbitOpacity = sys.isPlanet(rig.focus) ? smoothstep(30, 300, rig.distance / focus.radius) : 1;
-    system.placeRelativeTo(eye, hidden, sunVisible, daylight);
+    // Under thick air the Sun's disc is only as bright as the direct beam that gets through.
+    let sunDisc = sunVisible;
+    if (underAir) {
+      const tau = tauAbove(underAir.air, underAir.h);
+      sunDisc *= Math.exp(-(0.2126 * tau[0] + 0.7152 * tau[1] + 0.0722 * tau[2]) / Math.max(underAir.mu0, 0.03));
+    }
+    system.placeRelativeTo(eye, hidden, sunDisc, daylight);
     // Asteroids and comets: a map layer, shown when the view is wide enough to see orbits.
     smallBodies?.update(clock.tdb / 86400, sunPos, eye, Math.max(smoothstep(2e6, 2e7, rig.distance), rig.focus >= ASTEROID_ID && rig.focus < STAR_ID ? 1 : 0));
 
@@ -2295,6 +2371,18 @@ function starMass(star: NamedStar): number {
 /** Label priority: the Sun and planets first, then dwarf planets, moons, asteroids. */
 const KIND_ORDER: Record<Body['kind'], number> = { star: 0, planet: 1, dwarf: 2, moon: 3, asteroid: 4 };
 const LABEL_ORDER = [...BODIES].sort((a, b) => KIND_ORDER[a.kind] - KIND_ORDER[b.kind] || (a.id === 301 ? -1 : b.id === 301 ? 1 : 0));
+
+/** A world's relief map (pipeline/build_worlds.py relief_map) as raw RGBA bytes. */
+async function loadReliefMap(url: string): Promise<ReliefMap> {
+  const blob = await (await fetch(url)).blob();
+  const bitmap = await createImageBitmap(blob, { colorSpaceConversion: 'none', premultiplyAlpha: 'none' });
+  const canvas = document.createElement('canvas');
+  canvas.width = bitmap.width;
+  canvas.height = bitmap.height;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
+  ctx.drawImage(bitmap, 0, 0);
+  return { width: bitmap.width, height: bitmap.height, data: ctx.getImageData(0, 0, bitmap.width, bitmap.height).data };
+}
 
 function prepareMap(texture: THREE.Texture, renderer: THREE.WebGLRenderer): THREE.Texture {
   texture.colorSpace = THREE.NoColorSpace; // shaders linearise
