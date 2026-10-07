@@ -4,7 +4,57 @@ A real-time 3D simulator for travelling from Earth through the Solar System and 
 
 The full plan, including the roadmap, lives in the [design doc](https://claude.ai/code/artifact/c235450b-21cd-41a8-bc4b-b69ca4239c84).
 
-## Flight mode (this code)
+## Landing, walking and sky events (this code)
+
+**Landing and walking.** Set the ship down on the Moon, Mars or Earth and press O (or `Out`) to step outside, or press `Walk here` near the ground anywhere with terrain (`?walk=1` starts on foot). You walk in first person at the true surface gravity.
+
+- **Physics** (`src/core/walker.ts`). Walking happens in the body's rotating frame: its gravity, plus the centrifugal and Coriolis effects of the spin. Your walking pace follows from gravity. Walking is an inverted pendulum, and people walk at Froude number v²/(gL) = 0.25 and run at about 2.5, on Earth and in the Apollo footage alike. That gives a walk of 1.5 m/s on Earth, 0.9 m/s on Mars and 0.6 m/s on the Moon. Your feet only push through friction (μ = 0.6), so on the Moon starting, stopping and turning are slow. A jump leaves the ground at 3.1 m/s, the take-off speed of a 0.5 m jump on Earth. That is 3 m high and almost 4 s in the air on the Moon, and 1.3 m on Mars. Slopes steeper than 35° can't be climbed.
+- **Controls.** W/S/A/D walk, Shift runs, Space jumps, drag or the arrow keys look around, B boards the ship when it is within 20 m, and Esc stops walking. Phones get on-screen buttons.
+- **Landing sites**, by name in the search box (`?site=`):
+  - **Tranquility Base.** The LRO NAC 2 m elevation model and 0.5 m image, sharpened onto the global colour. Eagle's descent stage stands where LRO photographed it.
+  - **Jezero crater.** The Mars 2020 landing maps: CTX elevation and imagery over the whole crater (tiled at 80 m and 20 m), and HiRISE 1 m elevation and 25 cm image around Perseverance's landing site.
+  - **The Grand Canyon.**
+  - Within a few tens of metres the ground gets a fine procedural grain. It adds texture only, not information about the real surface.
+- **Mars.** MOLA elevation and Viking colour cover the whole planet. Its sky is dust: an optical depth of 0.5 of 1.5 µm grains that absorb blue light (Wolff et al. 2009). The daytime sky is butterscotch and the sky around a setting Sun is blue. Phobos's shadow falls on the ground.
+- **The sky from the surface** is the same sky as everywhere else: real stars, planets and the Sun, as seen from where you stand. In daylight on Mars or Earth the stars fade out. Star names never show through the ground.
+- **Gate:** `tests/walk.test.ts`.
+  - Gravity at the feet matches NASA's fact sheets (Moon 1.62, Mars 3.71 m/s²).
+  - Jumps rise v²/2g and stay up 2v/g to within 1%.
+  - Walking and running paces are the Froude-number values.
+  - Stopping from a run takes 2.4 times longer on the Moon than on Earth (μg braking).
+  - You stand still on a 20° slope and slide down a 45° one.
+
+**Sky events.** The Events menu now lists every solar and lunar eclipse, transit of Mercury and Venus, and close approach in the catalogue between 1962 and 2060. The next few come first. Picking one sets the time just before it and flies to a view of it (`?event=` with words from its name):
+- Central solar eclipses are shown from the ground where the eclipse is greatest, following the Sun. Partial ones are shown from space, over the shadow.
+- Lunar eclipses are shown from the Earth side of the Moon.
+- Transits are shown through a white-light solar filter: a close-up of the Sun gets the exposure of its own surface, so the sky goes black.
+- Phobos crossing the Sun is shown from Perseverance's landing site (2 April 2022, 35 s).
+- Close passes by asteroids and comets (Apophis in 2029, 2023 BU at 3,600 km above the ground, and Hyakutake) show the object and its path around Earth.
+
+- **Computed, not copied** (`src/core/skyevents.ts`, `scripts/build-events.mjs` → `src/generated/events.json`). Events are found with the app's own DE440 positions and Earth orientation. The shadow geometry follows the Explanatory Supplement, with Danjon's enlargement of Earth's shadow, as NASA uses. Close-approach tracks are JPL Horizons state tables, interpolated (`src/core/track.ts`, `public/data/events/`).
+- **Gate:** `tests/events.test.ts` compares the events with NASA's catalogues (Espenak, NASA GSFC).
+  - Solar: all 224 eclipses found, none extra, and every type agrees. Greatest eclipse is within 0.5 s and its point within 0.9 km. Central durations are within 0.6 s.
+  - Lunar: all 230 found and every type agrees. Greatest eclipse is within 2.4 s, and magnitudes are within 0.0004.
+  - Transits: the same 16 as NASA. Contacts are within 2 s where NASA gives seconds.
+  - Phobos: the transit falls within 2.5 s of Perseverance's own Mastcam-Z frames.
+  - Tracks: within 0.3 km of held-out Horizons positions, and within 0.4 s of JPL's close-approach times.
+
+### Limits
+
+- **Terrain.**
+  - The sharp sites are small: about 3 km around Eagle, and about 4 km of HiRISE inside Jezero. Elsewhere Mars is about 5 km per height sample and 2.6 km per colour pixel.
+  - Viking's colours are approximate. Its brightness is stretched for display, and the colour comes from a dust/basalt blend.
+- **Light.**
+  - The Mars sky is single scattering with a fixed factor for light scattered more than once. There are no dust storms or seasons.
+  - The ground has no shadows cast by hills or by the landers.
+- **Walking.**
+  - No spacesuit: the walking and jumping figures are for an unencumbered person.
+  - Your feet follow the finest terrain loaded, which can differ from the coarser mesh drawn far away.
+- **Events.**
+  - Delta T after 2026 is held at its 2026 value, while NASA extrapolates it to about 115 s by 2060. Eclipse paths after 2026 match the app's Earth, and sit up to 20 km in longitude from NASA's by 2060.
+  - Comets have no tails.
+
+## Flight mode
 
 Besides picking a name and flying there, you can now pilot a ship yourself. `Pilot a ship` (top right, or `?fly=1`) hands you the controls where the camera is; `Leave the ship` (or Esc) gives the camera back.
 
@@ -63,6 +113,7 @@ New targets: `?focus=Sgr%20A*`, `M87*`, `Gaia BH1`, `Gaia BH2`, `Gaia BH3`, `Cyg
 - **156,125 galaxies, plus 834,710 more from SDSS** (`pipeline/build_galaxies.py`). Measured distances come first: the Updated Nearby Galaxy Catalog (Cepheids, the tip of the red giant branch) and Cosmicflows-4 (Tully-Fisher, fundamental plane, supernovae, surface brightness fluctuations), using Cosmicflows-4 group distances for groups with at least two members. All other galaxies (2MRS, 6dFGS, SDSS) are placed by their CMB-frame redshift in flat ΛCDM with H0 = 74.6 (the Cosmicflows-4 scale). Redshift-only galaxies in the cores of the big clusters are placed at the cluster's distance, so the clusters are not stretched into "fingers of God". Each galaxy has its measured size, shape, orientation, colour and Milky Way extinction (SFD). Nearby ones are drawn as inclined discs or spheroids with their light spread to their true surface brightness; distant ones are points. 139 globular clusters (Harris 2010) are included.
 - **The nearest galaxies in 3D** (`pipeline/build_galaxy_models.py`, `src/render/galaxymodels.ts`). 60 galaxies, Andromeda, Triangulum, the Magellanic Clouds, the Whirlpool, the Sombrero and others, are volumes you can fly around and through, ray-marched on the GPU. Each is built from a survey image: SDSS DR9 g, r, i (linear CCD fluxes) where SDSS covers it, else the Digitized Sky Survey 2 red and blue plates, linearised. Foreground stars are removed using Gaia DR3. The image is split into a Sérsic bulge (fitted in 2D, deprojected to an oblate spheroid with the Prugniel–Simien profile) and a disc, which is deprojected with the galaxy's inclination into a face-on map. The disc's smooth light is in a thick sech² layer; its knots and fine structure, with the dust, in a thin one. Dust lanes come from where the image is both redder and fainter than its surroundings and are put on the near side; a smooth exponential dust disc with a hole for the bulge is added, and the disc's and bulge's light are corrected for the dimming the dust causes as seen from Earth. Edge-on galaxies get a smooth disc with their measured light and thickness. Interacting companions (NGC 5195) are fitted, taken out of their partner's picture and drawn at their own place.
 - **Detail below the survey images' resolution** (`src/core/galaxystars.ts`). Up close, a survey image has no more to give (a DSS2 pixel is several parsecs at Andromeda), so the models fill in what is smaller with structure drawn from their own light. Individual giants and supergiants (5% of the light, with a power-law spread of brightness) are scattered where the face-on map puts the light; young blue stars sit in clusters along the arms, where the map's young light is, with pink HII regions around some of them; the bulge's stars follow its Sérsic profile. They are dimmed by the model's dust along the sight line. Below a pixel of the image, the dust breaks into turbulent clouds and filaments and the young light into clumps between them. All of it averages to the maps: the stars appear only once they would be a few pixels apart, the noise only once a pixel is finer than the image, and the volume gives up the light the stars carry, so from Earth (and in the gate) nothing changes. Up close the exposure is set by what fills the view rather than burning out. The Sombrero's dust lies in a ring (Bendo et al. 2006) whose radius (7.2 kpc) and depth are fitted to its image.
+- **Andromeda from Pan-STARRS** (`ps1_detail` in `pipeline/build_galaxy_models.py`). The DSS2 plates are soft (3" seeing) and saturate across the bulge; Pan-STARRS DR1 is sharper (1.2") and unsaturated, but its sky subtraction removed M31's broad glow. So the plates keep everything coarser than 12 pixels and the PS1 r band gives everything finer, scaled to the plates on the bulge's isophotes; where the plates saturate, PS1 gives the whole core. The disc is fitted on the plates as before, and the bulge's size, profile and amplitude on PS1's core (B/T 0.28, near the 0.3 of Courteau et al. 2011). PS1's g band is corrupt in the core, so its r detail goes into both of the plates' bands by ratio.
 - **Telescope images of bright nebulae** (`pipeline/fetch_images.py`, `src/render/images.ts`). 26 nebulae use Digitized Sky Survey 2 colour images, faced to the camera as Earth sees them, with Gaia DR3 foreground stars removed. Every image and model is scaled so its total light matches the object's catalogue magnitude.
 - **Nebula close-ups, real then AI-enhanced** (`pipeline/build_nebula_detail.py`, `src/render/images.ts`). Flying in to a nebula's best-known feature (the Pillars of Creation, the Horsehead, the Ring ...) swaps in two nested close-ups as the picture's pixels grow past the screen's. The first is real data at 1″ per pixel: DSS2 for the large scales, with the fine detail from the CCD H-alpha surveys of the Galactic plane (VPHAS+, IPHAS) or DECaPS / Pan-STARRS where those are clean (they over-subtract bright nebulosity, so a field with many deep negative holes is not used). Where the plates saturated (bright cores), the whole-field picture is repaired from the survey. The second is that layer upscaled 4× by Real-ESRGAN (run offline on the CPU), i.e. detail below what any survey resolves, and labelled as AI in the info panel. Each close-up is back-projected onto its parent: averaged down onto the parent's pixels it reproduces the parent (mean residual a few per cent at most for the survey layer and under 1% for the AI layer, checked by `tests/nebulae.test.ts`), so the AI only fills in between the observed pixels and never changes what was observed. The Orion Nebula and the Pleiades nebulosity have none: their cores are saturated in every survey available.
 - **Galaxy clusters and the Local Group.** Search the Virgo, Fornax, Coma, Perseus, Centaurus and Hydra clusters, the Leo Triplet, the M81 and Sculptor groups and the Local Group. Labels show the brightest named galaxies in view.
@@ -168,7 +219,7 @@ Views can be linked with URL parameters, for example `?focus=Earth&lat=36.075&lo
 ```sh
 npm install
 npm run dev          # http://localhost:5173
-npm test             # ephemeris, Horizons, orientation, rotation, moons, eclipse, satellites, jitter, time, sky, galaxy, 3D galaxy, black hole and flight tests
+npm test             # ephemeris, Horizons, orientation, rotation, moons, eclipse, satellites, jitter, time, sky, galaxy, 3D galaxy, black hole, flight, walking and events tests
 npm run build
 npm run screenshot   # renders reference views to screenshots/ (headless Chromium)
 ```
@@ -224,8 +275,17 @@ python3 pipeline/fetch_galaxies.py $DATA       # UNGC, Cosmicflows-4, 2MRS, 6dFG
 python3 pipeline/build_galaxies.py $DATA public/data
 python3 pipeline/fetch_images.py $DATA public/data   # nebulae: DSS2 colour via CDS hips2fits, Gaia DR3 for the foreground stars
 python3 pipeline/build_nebula_detail.py $DATA public/data   # nebula close-ups: VPHAS+/IPHAS/DECaPS/Pan-STARRS via hips2fits, Real-ESRGAN x4 (needs torch, CPU is fine); run after fetch_images.py
-python3 pipeline/build_galaxy_models.py $DATA public/data   # 3D galaxies: SDSS DR9 / DSS2 via hips2fits, Gaia DR3; writes tests/fixtures/galaxy-models-reference.json
+python3 pipeline/build_galaxy_models.py $DATA public/data   # 3D galaxies: SDSS DR9 / DSS2 (+ Pan-STARRS DR1 for Andromeda) via hips2fits, Gaia DR3; writes tests/fixtures/galaxy-models-reference.json
 python3 pipeline/build_cmb.py $DATA public/data
+
+# Mars, Tranquility Base and Jezero crater: MOLA, Viking, LRO NAC, Mars 2020 CTX and HiRISE
+python3 pipeline/fetch_surfaces.py $DATA/surf
+python3 pipeline/build_surfaces.py $DATA/surf public/data/tiles src/generated/tiles.json   # --only mars,apollo11,jezero
+
+# Sky events: NASA's catalogues for the gate, Horizons tracks, then the events themselves
+python3 pipeline/fetch_event_reference.py tests/fixtures/events-reference.json
+python3 pipeline/fetch_approaches.py public/data/events tests/fixtures/approaches-reference.json
+node scripts/build-events.mjs
 
 # Black holes: the S-stars and the EHT images
 python3 pipeline/fetch_blackholes.py $DATA public/data   # VizieR (Gillessen et al. 2017), ESO image archive
@@ -265,4 +325,9 @@ Tiles are geographic: level L has 2^(L+1) × 2^L tiles of 180/2^L degrees. Colou
 - Milky Way structure: Reid et al. (2019) spiral arms, GRAVITY Collaboration (2022) Galactic Centre distance, Bland-Hawthorn and Gerhard (2016) review values for the discs, bulge and bar.
 - Black holes: GRAVITY Collaboration (2020, 2022) for Sgr A* and S2; Gillessen et al. (2017) S-star orbits via VizieR; Gebhardt et al. (2011) and Walker et al. (2018) for M87*; El-Badry et al. (2023) for Gaia BH1 and BH2; Gaia Collaboration, Panuzzo et al. (2024) for Gaia BH3; Miller-Jones et al. (2021) and Zhao et al. (2021) for Cygnus X-1; Bardeen (1973); Page and Thorne (1974); Gralla, Lupsasca and Marrone (2020).
 - Event Horizon Telescope images of M87* (2019) and Sgr A* (2022): EHT Collaboration, CC BY 4.0, via ESO (eso1907a, eso2208-eht-mwa).
-- NASA eclipse predictions by Fred Espenak (eclipse.gsfc.nasa.gov) for the 2027 path test; IERS Bulletin A for UT1.
+- NASA eclipse predictions by Fred Espenak (eclipse.gsfc.nasa.gov) for the 2027 path test and the sky events gate (Five Millennium Canons of solar and lunar eclipses, transits of Mercury and Venus); IERS Bulletin A for UT1.
+- MGS MOLA MEGDR (NASA/GSFC, PDS Geosciences Node); Viking MDIM 2.1 colour mosaic (USGS Astrogeology), via NASA Trek.
+- LRO NAC elevation model and image of the Apollo 11 site (NASA/GSFC/Arizona State University).
+- Mars 2020 Terrain Relative Navigation CTX and HiRISE elevation models and orthoimages of Jezero crater (USGS Astrogeology, NASA/JPL/University of Arizona).
+- JPL Horizons state vectors and the SBDB Close-Approach Data API for close approaches; NAIF Mars 2020 landing-site and clock kernels; Mars 2020 Mastcam-Z raw images (NASA/JPL-Caltech/ASU) for the Phobos transit check.
+- Dust properties: Wolff et al. (2009); gait: Minetti (2001), Kram et al. (1997).

@@ -151,10 +151,14 @@ void main() {
       // Blur the maps to what this step and this pixel cover.
       float footprint = max(0.5 * ds * dxy, pix);
       float lod = log2(max(footprint / texel, 1.0));
-      vec3 face = textureLod(uFace, uv, lod).rgb;
+      // Off the midplane the face-on structure blurs out (stars and dust above the disc
+      // are spread over a kpc, not stacked over the arms), else it would be drawn out
+      // into columns as tall as the disc is thick when seen at a slant.
+      float lodz = max(lod, log2(max(abs(q.z) / texel, 1.0)));
+      vec3 face = textureLod(uFace, uv, lodz).rgb;
       // Knots and fine structure in the thin layer, the smooth light in the thick one.
-      float young = textureLod(uDust, uv, lod).g;
-      float lane = textureLod(uDust, uv, max(lod - 1.0, 0.0)).r;
+      float young = textureLod(uDust, uv, lodz).g;
+      float lane = textureLod(uDust, uv, max(lodz - 1.0, 0.0)).r;
       float rr = length(q.xy);
       float tau = lane * lane * uTauMax + uTau0 * exp(-rr / uHd) * (uDh > 0.0 ? 1.0 - exp(-rr * rr / (uDh * uDh)) : 1.0);
       // Below the image's resolution: turbulent dust in clouds and filaments, with the

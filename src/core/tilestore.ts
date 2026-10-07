@@ -17,6 +17,11 @@ export interface LayerInfo {
   /** chunk key -> deepest level inside it */
   chunks: Record<string, number>;
   source: string;
+  /** Height layers: metres per int16 step and the height of step 0, if not the scheme's. */
+  heightUnit?: number;
+  heightOffset?: number;
+  /** Chunk roots, if not the scheme's (small layers keep every tile in one pack). */
+  chunkRoots?: number[];
 }
 
 export interface Manifest {
@@ -54,6 +59,8 @@ interface Chunk {
 
 export class TileStore {
   private readonly chunks = new Map<string, Promise<Chunk>>();
+  /** Chunks that failed to load: their tiles count as missing, so coarser data stands in. */
+  private readonly failed = new Set<string>();
   readonly grid: number;
   readonly image: number;
   private readonly heightUnit: number;
@@ -72,8 +79,8 @@ export class TileStore {
     return this.manifest.layers.some((l) => l.body === body);
   }
 
-  chunkKey(level: number, x: number, y: number): string {
-    const roots = this.manifest.scheme.chunkRoots;
+  chunkKey(level: number, x: number, y: number, layer?: LayerInfo): string {
+    const roots = layer?.chunkRoots ?? this.manifest.scheme.chunkRoots;
     let r = 0;
     for (const root of roots) if (root <= level) r = root;
     const shift = level - r;
@@ -83,8 +90,9 @@ export class TileStore {
   /** Whether `layer` holds tile (level, x, y), by the pipeline's own coverage rule. */
   covers(layer: LayerInfo, level: number, x: number, y: number): boolean {
     if (level < layer.levels[0] || level > layer.levels[1]) return false;
-    const deepest = layer.chunks[this.chunkKey(level, x, y)];
-    if (deepest === undefined || deepest < level) return false;
+    const key = this.chunkKey(level, x, y, layer);
+    const deepest = layer.chunks[key];
+    if (deepest === undefined || deepest < level || this.failed.has(`${layer.id}/${key}`)) return false;
     const s = tileSize(level);
     const [w, south, e, n] = layer.bbox;
     const x0 = Math.floor((w + 180) / s), x1 = Math.ceil((e + 180) / s) - 1;
@@ -106,13 +114,16 @@ export class TileStore {
 
   /** Raw bytes of a tile. */
   async bytes(ref: TileRef): Promise<Uint8Array> {
-    const key = this.chunkKey(ref.level, ref.x, ref.y);
+    const key = this.chunkKey(ref.level, ref.x, ref.y, ref.layer);
     const id = `${ref.layer.id}/${key}`;
     let chunk = this.chunks.get(id);
     if (!chunk) {
       chunk = this.loadChunk(`${this.baseUrl}${id}.bin`);
       this.chunks.set(id, chunk);
-      chunk.catch(() => this.chunks.delete(id));
+      chunk.catch(() => {
+        this.chunks.delete(id);
+        this.failed.add(id);
+      });
     }
     const c = await chunk;
     const entry = c.index.get(`${ref.level}/${ref.x}/${ref.y}`);
@@ -126,9 +137,11 @@ export class TileStore {
     const q = new Int16Array(raw.buffer, raw.byteOffset, raw.byteLength / 2);
     const heights = new Float32Array(q.length);
     const water = new Uint8Array(q.length);
+    const unit = ref.layer.heightUnit ?? this.heightUnit;
+    const offset = ref.layer.heightOffset ?? 0;
     for (let i = 0; i < q.length; i++) {
       water[i] = q[i] & 1;
-      heights[i] = ((q[i] & ~1) * this.heightUnit) / 1000;
+      heights[i] = ((q[i] & ~1) * unit + offset) / 1000;
     }
     return { heights, water };
   }
