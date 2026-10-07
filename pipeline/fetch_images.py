@@ -160,6 +160,24 @@ def clean_linear(lin: np.ndarray, fov: float, ra0: float, dec0: float, stars: np
                  star_scale: float = 1.0) -> np.ndarray:
     """Background-subtracted, star-free linear image (float, 0..), north up and east left."""
     n = lin.shape[0]
+    out = fill_stars(lin, fov, ra0, dec0, stars, others, star_scale)
+    yy, xx = np.mgrid[0:n, 0:n]
+    # Background: the faint part of the frame's edge, per colour. A nebula often fills its
+    # frame, so only its darkest edge pixels count as sky.
+    edge = np.concatenate([out[:n // 16].reshape(-1, 3), out[-n // 16:].reshape(-1, 3),
+                           out[:, :n // 16].reshape(-1, 3), out[:, -n // 16:].reshape(-1, 3)])
+    out = np.clip(out - np.percentile(edge, 5 if nebula else 40, axis=0), 0, None)
+    # Fade out toward the frame's edge (a circle), gently for a nebula so it has no rim.
+    r = np.hypot(xx - n / 2 + 0.5, yy - n / 2 + 0.5) / (n / 2)
+    t = np.clip((1 - r) / (0.5 if nebula else 0.15), 0, 1)
+    out *= (t * t * (3 - 2 * t))[..., None]
+    return out
+
+
+def fill_stars(lin: np.ndarray, fov: float, ra0: float, dec0: float, stars: np.ndarray, others: list,
+               star_scale: float = 1.0) -> np.ndarray:
+    """The image with the listed stars and galaxies cut out and filled from the surrounding light."""
+    n = lin.shape[0]
     pix = fov / n * 3600  # arcsec per pixel
     mask = np.zeros((n, n), bool)
     yy, xx = np.mgrid[0:n, 0:n]
@@ -197,15 +215,6 @@ def clean_linear(lin: np.ndarray, fov: float, ra0: float, dec0: float, stars: np
         known |= todo
         if known.all():
             break
-    # Background: the faint part of the frame's edge, per colour. A nebula often fills its
-    # frame, so only its darkest edge pixels count as sky.
-    edge = np.concatenate([out[:n // 16].reshape(-1, 3), out[-n // 16:].reshape(-1, 3),
-                           out[:, :n // 16].reshape(-1, 3), out[:, -n // 16:].reshape(-1, 3)])
-    out = np.clip(out - np.percentile(edge, 5 if nebula else 40, axis=0), 0, None)
-    # Fade out toward the frame's edge (a circle), gently for a nebula so it has no rim.
-    r = np.hypot(xx - n / 2 + 0.5, yy - n / 2 + 0.5) / (n / 2)
-    t = np.clip((1 - r) / (0.5 if nebula else 0.15), 0, 1)
-    out *= (t * t * (3 - 2 * t))[..., None]
     return out
 
 

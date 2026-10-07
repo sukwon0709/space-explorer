@@ -37,11 +37,46 @@
    "V": 6.3,
    "file": "trifid-nebula.jpg",
    "mean": [
-    0.090631,
-    0.0957,
-    0.110344
+    0.073163,
+    0.077735,
+    0.089908
    ],
-   "masked": 7348
+   "masked": 7348,
+   "repaired": 0.0494,
+   "detail": [
+    {
+     "file": "detail/trifid-nebula-1.jpg",
+     "ra": 270.595833,
+     "dec": -23.03,
+     "fov": 0.284444,
+     "px": 1024,
+     "gain": 0.940078,
+     "kind": "survey",
+     "what": "the dark lanes",
+     "source": "DSS2 above 3\", VPHAS+ DR4 below",
+     "survey": "VPHAS+ DR4",
+     "arcsec": 1.0,
+     "match": 0.00117,
+     "corr": [
+      0.584,
+      0.582,
+      0.486
+     ]
+    },
+    {
+     "file": "detail/trifid-nebula-2.jpg",
+     "ra": 270.595833,
+     "dec": -23.03,
+     "fov": 0.142222,
+     "px": 2048,
+     "gain": 1.050167,
+     "kind": "ai",
+     "what": "the dark lanes",
+     "source": "Real-ESRGAN x4plus from the DSS2 above 3\", VPHAS+ DR4 below layer, back-projected",
+     "arcsec": 0.25,
+     "match": 0.00032
+    }
+   ]
   },
   {
    "name": "Eagle Nebula",
@@ -59,11 +94,46 @@
    "V": 6.0,
    "file": "eagle-nebula.jpg",
    "mean": [
-    0.174072,
-    0.078482,
-    0.025917
+    0.097331,
+    0.043228,
+    0.01206
    ],
-   "masked": 6261
+   "masked": 6261,
+   "detail": [
+    {
+     "file": "detail/eagle-nebula-1.jpg",
+     "ra": 274.704167,
+     "dec": -13.836111,
+     "fov": 0.284444,
+     "px": 1024,
+     "gain": 0.844707,
+     "kind": "survey",
+     "what": "Pillars of Creation",
+     "source": "DSS2 above 3\", VPHAS+ DR4 below",
+     "survey": "VPHAS+ DR4",
+     "arcsec": 1.0,
+     "match": 0.00111,
+     "corr": [
+      0.526,
+      0.674,
+      0.785
+     ]
+    },
+    {
+     "file": "detail/eagle-nebula-2.jpg",
+     "ra": 274.704167,
+     "dec": -13.836111,
+     "fov": 0.142222,
+     "px": 2048,
+     "gain": 1.1159,
+     "kind": "ai",
+     "what": "Pillars of Creation",
+     "source": "Real-ESRGAN x4plus from the DSS2 above 3\", VPHAS+ DR4 below layer, back-projected",
+     "arcsec": 0.25,
+     "match": 0.00063
+    }
+   ],
+   "repaired": 0.0836
   },
   {
    "name": "Omega Nebula",
@@ -81,11 +151,46 @@
    "V": 6.0,
    "file": "omega-nebula.jpg",
    "mean": [
-    0.143997,
-    0.071102,
-    0.029476
+    0.060528,
+    0.029503,
+    0.011663
    ],
-   "masked": 8873
+   "masked": 8873,
+   "repaired": 0.062,
+   "detail": [
+    {
+     "file": "detail/omega-nebula-1.jpg",
+     "ra": 275.166667,
+     "dec": -16.183333,
+     "fov": 0.284444,
+     "px": 1024,
+     "gain": 0.833004,
+     "kind": "survey",
+     "what": "the bright bar",
+     "source": "DSS2 above 3\", VPHAS+ DR4 below",
+     "survey": "VPHAS+ DR4",
+     "arcsec": 1.0,
+     "match": 0.00178,
+     "corr": [
+      0.677,
+      0.84,
+      0.908
+     ]
+    },
+    {
+     "file": "detail/omega-nebula-2.jpg",
+     "ra": 275.166667,
+     "dec": -16.183333,
+     "fov": 0.142222,
+     "px": 2048,
+     "gain": 0.98185,
+     "kind": "ai",
+     "what": "the bright bar",
+     "source": "Real-ESRGAN x4plus from the DSS2 above 3\", VPHAS+ DR4 below layer, back-projected",
+     "arcsec": 0.25,
+     "match": 0.00084
+    }
+   ]
   },
   {
    "name": "Carina Nebula",
@@ -102,11 +207,46 @@
    "V": 3.0,
    "file": "carina-nebula.jpg",
    "mean": [
-    0.197887,
-    0.139876,
-    0.093531
+    0.174365,
+    0.123166,
+    0.082278
    ],
-   "masked": 41338
+   "masked": 41338,
+   "detail": [
+    {
+     "file": "detail/carina-nebula-1.jpg",
+     "ra": 161.259167,
+     "dec": -59.7,
+     "fov": 0.284444,
+     "px": 1024,
+     "gain": 1.228485,
+     "kind": "survey",
+     "what": "Keyhole Nebula and Eta Carinae",
+     "source": "DSS2 above 3\", DECaPS DR2 below",
+     "survey": "DECaPS DR2",
+     "arcsec": 1.0,
+     "match": 0.00077,
+     "corr": [
+      0.519,
+      0.528,
+      0.496
+     ]
+    },
+    {
+     "file": "detail/carina-nebula-2.jpg",
+     "ra": 161.259167,
+     "dec": -59.7,
+     "fov": 0.142222,
+     "px": 2048,
+     "gain": 1.371019,
+     "kind": "ai",
+     "what": "Keyhole Nebula and Eta Carinae",
+     "source": "Real-ESRGAN x4plus from the DSS2 above 3\", DECaPS DR2 below layer, back-projected",
+     "arcsec": 0.25,
+     "match": 0.0005
+    }
+   ],
+   "repaired": 0.0071
   },
   {
    "name": "Rosette Nebula",
@@ -123,11 +263,46 @@
    "V": 6.0,
    "file": "rosette-nebula.jpg",
    "mean": [
-    0.055104,
-    0.029516,
-    0.012734
+    0.055077,
+    0.029491,
+    0.012709
    ],
-   "masked": 5657
+   "masked": 5657,
+   "repaired": 0.0,
+   "detail": [
+    {
+     "file": "detail/rosette-nebula-1.jpg",
+     "ra": 97.958333,
+     "dec": 4.966667,
+     "fov": 0.284444,
+     "px": 1024,
+     "gain": 0.624162,
+     "kind": "survey",
+     "what": "NGC 2237 and its globules",
+     "source": "DSS2 above 3\", IPHAS DR2 below",
+     "survey": "IPHAS DR2",
+     "arcsec": 1.0,
+     "match": 0.00262,
+     "corr": [
+      0.273,
+      0.279,
+      0.275
+     ]
+    },
+    {
+     "file": "detail/rosette-nebula-2.jpg",
+     "ra": 97.958333,
+     "dec": 4.966667,
+     "fov": 0.142222,
+     "px": 2048,
+     "gain": 0.247495,
+     "kind": "ai",
+     "what": "NGC 2237 and its globules",
+     "source": "Real-ESRGAN x4plus from the DSS2 above 3\", IPHAS DR2 below layer, back-projected",
+     "arcsec": 0.25,
+     "match": 0.00039
+    }
+   ]
   },
   {
    "name": "Helix Nebula",
@@ -143,11 +318,46 @@
    "V": 7.6,
    "file": "helix-nebula.jpg",
    "mean": [
-    0.025318,
-    0.053851,
-    0.100391
+    0.025266,
+    0.053784,
+    0.100308
    ],
-   "masked": 254
+   "masked": 254,
+   "repaired": 0.0018,
+   "detail": [
+    {
+     "file": "detail/helix-nebula-1.jpg",
+     "ra": 337.410417,
+     "dec": -20.837222,
+     "fov": 0.284444,
+     "px": 1024,
+     "gain": 0.982395,
+     "kind": "survey",
+     "what": "the ring",
+     "source": "DSS2",
+     "survey": null,
+     "arcsec": 1.0,
+     "match": 0.00122,
+     "corr": [
+      0.0,
+      0.0,
+      0.0
+     ]
+    },
+    {
+     "file": "detail/helix-nebula-2.jpg",
+     "ra": 337.410417,
+     "dec": -20.837222,
+     "fov": 0.142222,
+     "px": 2048,
+     "gain": 1.044827,
+     "kind": "ai",
+     "what": "the ring",
+     "source": "Real-ESRGAN x4plus from the DSS2 layer, back-projected",
+     "arcsec": 0.25,
+     "match": 0.00149
+    }
+   ]
   },
   {
    "name": "Ring Nebula",
@@ -164,11 +374,46 @@
    "V": 8.8,
    "file": "ring-nebula.jpg",
    "mean": [
-    0.090371,
-    0.085377,
-    0.081303
+    0.049886,
+    0.02978,
+    0.016029
    ],
-   "masked": 93
+   "masked": 93,
+   "detail": [
+    {
+     "file": "detail/ring-nebula-1.jpg",
+     "ra": 283.39625,
+     "dec": 33.029167,
+     "fov": 0.07,
+     "px": 1024,
+     "gain": 0.947377,
+     "kind": "survey",
+     "what": "the ring",
+     "source": "DSS2 above 3\", Pan-STARRS DR1 below",
+     "survey": "Pan-STARRS DR1",
+     "arcsec": 0.246,
+     "match": 0.00197,
+     "corr": [
+      0.846,
+      0.888,
+      0.896
+     ]
+    },
+    {
+     "file": "detail/ring-nebula-2.jpg",
+     "ra": 283.39625,
+     "dec": 33.029167,
+     "fov": 0.035,
+     "px": 2048,
+     "gain": 0.98898,
+     "kind": "ai",
+     "what": "the ring",
+     "source": "Real-ESRGAN x4plus from the DSS2 above 3\", Pan-STARRS DR1 below layer, back-projected",
+     "arcsec": 0.062,
+     "match": 0.00031
+    }
+   ],
+   "repaired": 0.0813
   },
   {
    "name": "Dumbbell Nebula",
@@ -185,11 +430,46 @@
    "V": 7.5,
    "file": "dumbbell-nebula.jpg",
    "mean": [
-    0.16585,
-    0.175764,
-    0.189824
+    0.088351,
+    0.097091,
+    0.109349
    ],
-   "masked": 2446
+   "masked": 2446,
+   "repaired": 0.1452,
+   "detail": [
+    {
+     "file": "detail/dumbbell-nebula-1.jpg",
+     "ra": 299.90125,
+     "dec": 22.721111,
+     "fov": 0.2,
+     "px": 1024,
+     "gain": 0.79046,
+     "kind": "survey",
+     "what": "the lobes",
+     "source": "DSS2 above 3\", IPHAS DR2 below",
+     "survey": "IPHAS DR2",
+     "arcsec": 0.703,
+     "match": 0.00285,
+     "corr": [
+      0.734,
+      0.716,
+      0.673
+     ]
+    },
+    {
+     "file": "detail/dumbbell-nebula-2.jpg",
+     "ra": 299.90125,
+     "dec": 22.721111,
+     "fov": 0.1,
+     "px": 2048,
+     "gain": 0.889712,
+     "kind": "ai",
+     "what": "the lobes",
+     "source": "Real-ESRGAN x4plus from the DSS2 above 3\", IPHAS DR2 below layer, back-projected",
+     "arcsec": 0.176,
+     "match": 0.00053
+    }
+   ]
   },
   {
    "name": "Crab Nebula",
@@ -206,11 +486,46 @@
    "V": 8.4,
    "file": "crab-nebula.jpg",
    "mean": [
-    0.13784,
-    0.109573,
-    0.087513
+    0.117966,
+    0.088727,
+    0.064935
    ],
-   "masked": 209
+   "masked": 209,
+   "repaired": 0.0892,
+   "detail": [
+    {
+     "file": "detail/crab-nebula-1.jpg",
+     "ra": 83.632917,
+     "dec": 22.014444,
+     "fov": 0.15,
+     "px": 1024,
+     "gain": 0.923637,
+     "kind": "survey",
+     "what": "the filaments",
+     "source": "DSS2 above 3\", Pan-STARRS DR1 below",
+     "survey": "Pan-STARRS DR1",
+     "arcsec": 0.527,
+     "match": 0.00166,
+     "corr": [
+      0.557,
+      0.657,
+      0.733
+     ]
+    },
+    {
+     "file": "detail/crab-nebula-2.jpg",
+     "ra": 83.632917,
+     "dec": 22.014444,
+     "fov": 0.075,
+     "px": 2048,
+     "gain": 0.94242,
+     "kind": "ai",
+     "what": "the filaments",
+     "source": "Real-ESRGAN x4plus from the DSS2 above 3\", Pan-STARRS DR1 below layer, back-projected",
+     "arcsec": 0.132,
+     "match": 0.00027
+    }
+   ]
   },
   {
    "name": "Pleiades nebulosity",
@@ -250,11 +565,46 @@
    "V": 7.3,
    "file": "horsehead-nebula.jpg",
    "mean": [
-    0.058599,
-    0.054503,
-    0.056335
+    0.058568,
+    0.054495,
+    0.056329
    ],
-   "masked": 3410
+   "masked": 3410,
+   "detail": [
+    {
+     "file": "detail/horsehead-nebula-1.jpg",
+     "ra": 85.245833,
+     "dec": -2.458333,
+     "fov": 0.284444,
+     "px": 1024,
+     "gain": 0.969895,
+     "kind": "survey",
+     "what": "the Horsehead, Barnard 33",
+     "source": "DSS2",
+     "survey": null,
+     "arcsec": 1.0,
+     "match": 0.00348,
+     "corr": [
+      0.0,
+      0.0,
+      0.0
+     ]
+    },
+    {
+     "file": "detail/horsehead-nebula-2.jpg",
+     "ra": 85.245833,
+     "dec": -2.458333,
+     "fov": 0.142222,
+     "px": 2048,
+     "gain": 1.033437,
+     "kind": "ai",
+     "what": "the Horsehead, Barnard 33",
+     "source": "Real-ESRGAN x4plus from the DSS2 layer, back-projected",
+     "arcsec": 0.25,
+     "match": 0.00145
+    }
+   ],
+   "repaired": 0.0001
   },
   {
    "name": "Heart Nebula",
@@ -270,11 +620,46 @@
    "V": 6.5,
    "file": "heart-nebula.jpg",
    "mean": [
-    0.014199,
-    0.007418,
-    0.003148
+    0.01408,
+    0.007308,
+    0.003056
    ],
-   "masked": 12534
+   "masked": 12534,
+   "repaired": 0.0001,
+   "detail": [
+    {
+     "file": "detail/heart-nebula-1.jpg",
+     "ra": 38.175,
+     "dec": 61.45,
+     "fov": 0.284444,
+     "px": 1024,
+     "gain": 0.922971,
+     "kind": "survey",
+     "what": "Melotte 15",
+     "source": "DSS2 above 3\", IPHAS DR2 below",
+     "survey": "IPHAS DR2",
+     "arcsec": 1.0,
+     "match": 0.00463,
+     "corr": [
+      0.637,
+      0.7,
+      0.722
+     ]
+    },
+    {
+     "file": "detail/heart-nebula-2.jpg",
+     "ra": 38.175,
+     "dec": 61.45,
+     "fov": 0.142222,
+     "px": 2048,
+     "gain": 0.752614,
+     "kind": "ai",
+     "what": "Melotte 15",
+     "source": "Real-ESRGAN x4plus from the DSS2 above 3\", IPHAS DR2 below layer, back-projected",
+     "arcsec": 0.25,
+     "match": 0.00126
+    }
+   ]
   },
   {
    "name": "Lagoon Nebula",
@@ -291,11 +676,46 @@
    "V": 6.0,
    "file": "lagoon-nebula.jpg",
    "mean": [
-    0.105024,
-    0.088001,
-    0.073411
+    0.027978,
+    0.023578,
+    0.019686
    ],
-   "masked": 2991
+   "masked": 2991,
+   "repaired": 0.024,
+   "detail": [
+    {
+     "file": "detail/lagoon-nebula-1.jpg",
+     "ra": 270.92125,
+     "dec": -24.376944,
+     "fov": 0.284444,
+     "px": 1024,
+     "gain": 0.876483,
+     "kind": "survey",
+     "what": "Hourglass Nebula",
+     "source": "DSS2 above 3\", VPHAS+ DR4 below",
+     "survey": "VPHAS+ DR4",
+     "arcsec": 1.0,
+     "match": 0.0015,
+     "corr": [
+      0.56,
+      0.63,
+      0.667
+     ]
+    },
+    {
+     "file": "detail/lagoon-nebula-2.jpg",
+     "ra": 270.92125,
+     "dec": -24.376944,
+     "fov": 0.142222,
+     "px": 2048,
+     "gain": 1.854387,
+     "kind": "ai",
+     "what": "Hourglass Nebula",
+     "source": "Real-ESRGAN x4plus from the DSS2 above 3\", VPHAS+ DR4 below layer, back-projected",
+     "arcsec": 0.25,
+     "match": 0.00459
+    }
+   ]
   },
   {
    "name": "North America Nebula",
@@ -313,11 +733,46 @@
    "V": 4.0,
    "file": "north-america-nebula.jpg",
    "mean": [
-    0.049223,
-    0.026076,
+    0.049222,
+    0.026071,
     0.011322
    ],
-   "masked": 2541
+   "masked": 2541,
+   "repaired": 0.0,
+   "detail": [
+    {
+     "file": "detail/north-america-nebula-1.jpg",
+     "ra": 312.75,
+     "dec": 44.366667,
+     "fov": 0.284444,
+     "px": 1024,
+     "gain": 0.965149,
+     "kind": "survey",
+     "what": "Pelican Nebula, IC 5070",
+     "source": "DSS2 above 3\", IPHAS DR2 below",
+     "survey": "IPHAS DR2",
+     "arcsec": 1.0,
+     "match": 0.0034,
+     "corr": [
+      0.506,
+      0.639,
+      0.695
+     ]
+    },
+    {
+     "file": "detail/north-america-nebula-2.jpg",
+     "ra": 312.75,
+     "dec": 44.366667,
+     "fov": 0.142222,
+     "px": 2048,
+     "gain": 1.036116,
+     "kind": "ai",
+     "what": "Pelican Nebula, IC 5070",
+     "source": "Real-ESRGAN x4plus from the DSS2 above 3\", IPHAS DR2 below layer, back-projected",
+     "arcsec": 0.25,
+     "match": 0.0006
+    }
+   ]
   },
   {
    "name": "Veil Nebula",
@@ -335,11 +790,46 @@
    "V": 7.0,
    "file": "veil-nebula.jpg",
    "mean": [
-    0.006122,
-    0.003863,
-    0.002574
+    0.005946,
+    0.003548,
+    0.002159
    ],
-   "masked": 2815
+   "masked": 2815,
+   "repaired": 0.0,
+   "detail": [
+    {
+     "file": "detail/veil-nebula-1.jpg",
+     "ra": 314.079167,
+     "dec": 31.743333,
+     "fov": 0.284444,
+     "px": 1024,
+     "gain": 0.306746,
+     "kind": "survey",
+     "what": "NGC 6992, the Eastern Veil",
+     "source": "DSS2 above 3\", Pan-STARRS DR1 below",
+     "survey": "Pan-STARRS DR1",
+     "arcsec": 1.0,
+     "match": 0.00892,
+     "corr": [
+      0.877,
+      0.89,
+      0.889
+     ]
+    },
+    {
+     "file": "detail/veil-nebula-2.jpg",
+     "ra": 314.079167,
+     "dec": 31.743333,
+     "fov": 0.142222,
+     "px": 2048,
+     "gain": 0.319032,
+     "kind": "ai",
+     "what": "NGC 6992, the Eastern Veil",
+     "source": "Real-ESRGAN x4plus from the DSS2 above 3\", Pan-STARRS DR1 below layer, back-projected",
+     "arcsec": 0.25,
+     "match": 0.00016
+    }
+   ]
   },
   {
    "name": "Soul Nebula",
@@ -355,11 +845,46 @@
    "V": 6.5,
    "file": "soul-nebula.jpg",
    "mean": [
-    0.014263,
-    0.007706,
-    0.003631
+    0.013927,
+    0.007401,
+    0.003363
    ],
-   "masked": 2194
+   "masked": 2194,
+   "repaired": 0.0,
+   "detail": [
+    {
+     "file": "detail/soul-nebula-1.jpg",
+     "ra": 42.75,
+     "dec": 60.416667,
+     "fov": 0.284444,
+     "px": 1024,
+     "gain": 0.733196,
+     "kind": "survey",
+     "what": "the central cavity",
+     "source": "DSS2 above 3\", Pan-STARRS DR1 below",
+     "survey": "Pan-STARRS DR1",
+     "arcsec": 1.0,
+     "match": 0.01886,
+     "corr": [
+      0.865,
+      0.884,
+      0.885
+     ]
+    },
+    {
+     "file": "detail/soul-nebula-2.jpg",
+     "ra": 42.75,
+     "dec": 60.416667,
+     "fov": 0.142222,
+     "px": 2048,
+     "gain": 0.492415,
+     "kind": "ai",
+     "what": "the central cavity",
+     "source": "Real-ESRGAN x4plus from the DSS2 above 3\", Pan-STARRS DR1 below layer, back-projected",
+     "arcsec": 0.25,
+     "match": 0.00164
+    }
+   ]
   },
   {
    "name": "California Nebula",
@@ -375,11 +900,46 @@
    "V": 6.0,
    "file": "california-nebula.jpg",
    "mean": [
-    0.029608,
-    0.01242,
-    0.002115
+    0.029557,
+    0.012376,
+    0.002078
    ],
-   "masked": 887
+   "masked": 887,
+   "repaired": 0.0002,
+   "detail": [
+    {
+     "file": "detail/california-nebula-1.jpg",
+     "ra": 60.825,
+     "dec": 36.421667,
+     "fov": 0.284444,
+     "px": 1024,
+     "gain": 1.594142,
+     "kind": "survey",
+     "what": "the bright ridge",
+     "source": "DSS2",
+     "survey": null,
+     "arcsec": 1.0,
+     "match": 0.00412,
+     "corr": [
+      0.0,
+      0.0,
+      0.0
+     ]
+    },
+    {
+     "file": "detail/california-nebula-2.jpg",
+     "ra": 60.825,
+     "dec": 36.421667,
+     "fov": 0.142222,
+     "px": 2048,
+     "gain": 2.071107,
+     "kind": "ai",
+     "what": "the bright ridge",
+     "source": "Real-ESRGAN x4plus from the DSS2 layer, back-projected",
+     "arcsec": 0.25,
+     "match": 0.00177
+    }
+   ]
   },
   {
    "name": "Elephant's Trunk Nebula",
@@ -395,11 +955,46 @@
    "V": 6.0,
    "file": "elephant-s-trunk-nebula.jpg",
    "mean": [
-    0.046379,
-    0.018859,
-    0.004578
+    0.046355,
+    0.018836,
+    0.004558
    ],
-   "masked": 1715
+   "masked": 1715,
+   "repaired": 0.0,
+   "detail": [
+    {
+     "file": "detail/elephant-s-trunk-nebula-1.jpg",
+     "ra": 324.170833,
+     "dec": 57.502222,
+     "fov": 0.284444,
+     "px": 1024,
+     "gain": 0.846287,
+     "kind": "survey",
+     "what": "the Elephant's Trunk, vdB 142",
+     "source": "DSS2 above 3\", IPHAS DR2 below",
+     "survey": "IPHAS DR2",
+     "arcsec": 1.0,
+     "match": 0.00707,
+     "corr": [
+      0.525,
+      0.555,
+      0.569
+     ]
+    },
+    {
+     "file": "detail/elephant-s-trunk-nebula-2.jpg",
+     "ra": 324.170833,
+     "dec": 57.502222,
+     "fov": 0.142222,
+     "px": 2048,
+     "gain": 0.915897,
+     "kind": "ai",
+     "what": "the Elephant's Trunk, vdB 142",
+     "source": "Real-ESRGAN x4plus from the DSS2 above 3\", IPHAS DR2 below layer, back-projected",
+     "arcsec": 0.25,
+     "match": 0.00159
+    }
+   ]
   },
   {
    "name": "Pacman Nebula",
@@ -415,11 +1010,46 @@
    "V": 7.4,
    "file": "pacman-nebula.jpg",
    "mean": [
-    0.110507,
-    0.054902,
-    0.020694
+    0.09562,
+    0.047301,
+    0.017514
    ],
-   "masked": 2084
+   "masked": 2084,
+   "repaired": 0.0121,
+   "detail": [
+    {
+     "file": "detail/pacman-nebula-1.jpg",
+     "ra": 13.245833,
+     "dec": 56.621944,
+     "fov": 0.284444,
+     "px": 1024,
+     "gain": 1.053195,
+     "kind": "survey",
+     "what": "the pillars",
+     "source": "DSS2 above 3\", Pan-STARRS DR1 below",
+     "survey": "Pan-STARRS DR1",
+     "arcsec": 1.0,
+     "match": 0.00358,
+     "corr": [
+      0.773,
+      0.869,
+      0.905
+     ]
+    },
+    {
+     "file": "detail/pacman-nebula-2.jpg",
+     "ra": 13.245833,
+     "dec": 56.621944,
+     "fov": 0.142222,
+     "px": 2048,
+     "gain": 1.282419,
+     "kind": "ai",
+     "what": "the pillars",
+     "source": "Real-ESRGAN x4plus from the DSS2 above 3\", Pan-STARRS DR1 below layer, back-projected",
+     "arcsec": 0.25,
+     "match": 0.00181
+    }
+   ]
   },
   {
    "name": "Bubble Nebula",
@@ -435,11 +1065,46 @@
    "V": 10.0,
    "file": "bubble-nebula.jpg",
    "mean": [
-    0.049924,
-    0.019128,
-    0.004159
+    0.039817,
+    0.014888,
+    0.002877
    ],
-   "masked": 3715
+   "masked": 3715,
+   "repaired": 0.0079,
+   "detail": [
+    {
+     "file": "detail/bubble-nebula-1.jpg",
+     "ra": 350.2,
+     "dec": 61.201667,
+     "fov": 0.284444,
+     "px": 1024,
+     "gain": 0.799148,
+     "kind": "survey",
+     "what": "the bubble",
+     "source": "DSS2 above 3\", IPHAS DR2 below",
+     "survey": "IPHAS DR2",
+     "arcsec": 1.0,
+     "match": 0.00514,
+     "corr": [
+      0.596,
+      0.669,
+      0.685
+     ]
+    },
+    {
+     "file": "detail/bubble-nebula-2.jpg",
+     "ra": 350.2,
+     "dec": 61.201667,
+     "fov": 0.142222,
+     "px": 2048,
+     "gain": 0.912105,
+     "kind": "ai",
+     "what": "the bubble",
+     "source": "Real-ESRGAN x4plus from the DSS2 above 3\", IPHAS DR2 below layer, back-projected",
+     "arcsec": 0.25,
+     "match": 0.00152
+    }
+   ]
   },
   {
    "name": "Cone Nebula",
@@ -456,11 +1121,46 @@
    "V": 6.5,
    "file": "cone-nebula.jpg",
    "mean": [
-    0.012346,
-    0.010069,
-    0.009171
+    0.011917,
+    0.009677,
+    0.008825
    ],
-   "masked": 699
+   "masked": 699,
+   "repaired": 0.0,
+   "detail": [
+    {
+     "file": "detail/cone-nebula-1.jpg",
+     "ra": 100.291667,
+     "dec": 9.45,
+     "fov": 0.284444,
+     "px": 1024,
+     "gain": 0.483627,
+     "kind": "survey",
+     "what": "the Cone",
+     "source": "DSS2 above 3\", IPHAS DR2 below",
+     "survey": "IPHAS DR2",
+     "arcsec": 1.0,
+     "match": 0.02876,
+     "corr": [
+      0.799,
+      0.835,
+      0.816
+     ]
+    },
+    {
+     "file": "detail/cone-nebula-2.jpg",
+     "ra": 100.291667,
+     "dec": 9.45,
+     "fov": 0.142222,
+     "px": 2048,
+     "gain": 0.577632,
+     "kind": "ai",
+     "what": "the Cone",
+     "source": "Real-ESRGAN x4plus from the DSS2 above 3\", IPHAS DR2 below layer, back-projected",
+     "arcsec": 0.25,
+     "match": 0.00147
+    }
+   ]
   },
   {
    "name": "Seagull Nebula",
@@ -476,11 +1176,46 @@
    "V": 7.0,
    "file": "seagull-nebula.jpg",
    "mean": [
-    0.012494,
-    0.007466,
-    0.004247
+    0.012112,
+    0.007084,
+    0.003861
    ],
-   "masked": 3330
+   "masked": 3330,
+   "repaired": 0.0001,
+   "detail": [
+    {
+     "file": "detail/seagull-nebula-1.jpg",
+     "ra": 106.104167,
+     "dec": -10.45,
+     "fov": 0.284444,
+     "px": 1024,
+     "gain": 0.949536,
+     "kind": "survey",
+     "what": "the head",
+     "source": "DSS2 above 3\", VPHAS+ DR4 below",
+     "survey": "VPHAS+ DR4",
+     "arcsec": 1.0,
+     "match": 0.00468,
+     "corr": [
+      0.246,
+      0.291,
+      0.308
+     ]
+    },
+    {
+     "file": "detail/seagull-nebula-2.jpg",
+     "ra": 106.104167,
+     "dec": -10.45,
+     "fov": 0.142222,
+     "px": 2048,
+     "gain": 1.01478,
+     "kind": "ai",
+     "what": "the head",
+     "source": "Real-ESRGAN x4plus from the DSS2 above 3\", VPHAS+ DR4 below layer, back-projected",
+     "arcsec": 0.25,
+     "match": 0.00034
+    }
+   ]
   },
   {
    "name": "Thor's Helmet",
@@ -496,11 +1231,46 @@
    "V": 10.0,
    "file": "thor-s-helmet.jpg",
    "mean": [
-    0.045729,
-    0.035319,
-    0.027715
+    0.043841,
+    0.033788,
+    0.026517
    ],
-   "masked": 1119
+   "masked": 1119,
+   "repaired": 0.0064,
+   "detail": [
+    {
+     "file": "detail/thor-s-helmet-1.jpg",
+     "ra": 109.625,
+     "dec": -13.23,
+     "fov": 0.25,
+     "px": 1024,
+     "gain": 0.930352,
+     "kind": "survey",
+     "what": "the helmet",
+     "source": "DSS2 above 3\", Pan-STARRS DR1 below",
+     "survey": "Pan-STARRS DR1",
+     "arcsec": 0.879,
+     "match": 0.01094,
+     "corr": [
+      0.806,
+      0.828,
+      0.811
+     ]
+    },
+    {
+     "file": "detail/thor-s-helmet-2.jpg",
+     "ra": 109.625,
+     "dec": -13.23,
+     "fov": 0.125,
+     "px": 2048,
+     "gain": 1.100205,
+     "kind": "ai",
+     "what": "the helmet",
+     "source": "Real-ESRGAN x4plus from the DSS2 above 3\", Pan-STARRS DR1 below layer, back-projected",
+     "arcsec": 0.22,
+     "match": 0.00358
+    }
+   ]
   },
   {
    "name": "Running Chicken Nebula",
@@ -516,11 +1286,46 @@
    "V": 6.0,
    "file": "running-chicken-nebula.jpg",
    "mean": [
-    0.112907,
-    0.061978,
-    0.028765
+    0.110248,
+    0.060505,
+    0.027922
    ],
-   "masked": 2902
+   "masked": 2902,
+   "repaired": 0.0026,
+   "detail": [
+    {
+     "file": "detail/running-chicken-nebula-1.jpg",
+     "ra": 174.583333,
+     "dec": -63.366667,
+     "fov": 0.284444,
+     "px": 1024,
+     "gain": 1.227159,
+     "kind": "survey",
+     "what": "Thackeray's globules",
+     "source": "DSS2 above 3\", VPHAS+ DR4 below",
+     "survey": "VPHAS+ DR4",
+     "arcsec": 1.0,
+     "match": 0.00219,
+     "corr": [
+      0.699,
+      0.72,
+      0.709
+     ]
+    },
+    {
+     "file": "detail/running-chicken-nebula-2.jpg",
+     "ra": 174.583333,
+     "dec": -63.366667,
+     "fov": 0.142222,
+     "px": 2048,
+     "gain": 1.493135,
+     "kind": "ai",
+     "what": "Thackeray's globules",
+     "source": "Real-ESRGAN x4plus from the DSS2 above 3\", VPHAS+ DR4 below layer, back-projected",
+     "arcsec": 0.25,
+     "match": 0.00124
+    }
+   ]
   },
   {
    "name": "Tarantula Nebula",

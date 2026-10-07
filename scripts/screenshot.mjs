@@ -76,6 +76,12 @@ const views = {
   'cosmic-web': `focus=Milky%20Way&t=${T}&dist=2e22&pitch=0.5`,
   'microwave-sky': `focus=Earth&t=${T}&dist=400000&sky=266.4,-28.9&fov=120&cmb=1`,
   'observable-universe': `focus=Milky%20Way&t=${T}&dist=1e24&pitch=0.3`,
+  // Flying in to the Pillars of Creation: the whole-field plate picture, the survey
+  // close-up (1 arcsec pixels from Earth), then the AI-enhanced one (0.25 arcsec).
+  'eagle': `focus=Eagle%20Nebula&t=${T}`,
+  'pillars-survey': `focus=Eagle%20Nebula&t=${T}&dist=4e14`,
+  'pillars-ai': `focus=Eagle%20Nebula&t=${T}&dist=9e13`,
+  'horsehead-close': `focus=Horsehead%20Nebula&t=${T}&dist=1e14`,
   // Milestone 6: black holes.
   'sgr-a': `focus=Sgr%20A*&t=${T}`,
   'sgr-a-visible': `focus=Sgr%20A*&t=${T}&radio=0&dist=1.2e8&pitch=0.3`,
@@ -123,6 +129,8 @@ for (const [name, query] of Object.entries(views)) {
     await page.waitForTimeout(1000);
     quiet = (await page.evaluate(() => document.body.dataset.tiles)) === 'idle' ? quiet + 1 : 0;
   }
+  // Close-up pictures load one after another as each takes over from its parent.
+  if (query.includes('Nebula&')) await page.waitForTimeout(6000);
   await page.screenshot({ timeout: 180000, path: `${outDir}/${name}.png` });
   console.log(`saved ${outDir}/${name}.png`);
 }
