@@ -93,7 +93,7 @@ uniform vec3 uCamBody;
 uniform float uFlatten;
 uniform float uSunIntensity;
 uniform vec3 uEclTint;
-uniform float uAlbedoScale;
+uniform vec3 uAlbedoScale;
 uniform sampler2D uDetailMap;
 uniform float uDetail;
 varying vec2 vUv;
@@ -213,7 +213,7 @@ export class Globe {
     uEclSunRadius: { value: 695700 },
     uEclOcc: { value: new THREE.Vector4() },
     uEclTint: { value: new THREE.Vector3() },
-    uAlbedoScale: { value: 1 },
+    uAlbedoScale: { value: new THREE.Vector3(1, 1, 1) },
     uDetailMap: { value: detailMap() },
     uDetail: { value: 0 },
   };

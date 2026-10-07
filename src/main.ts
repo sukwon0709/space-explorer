@@ -11,10 +11,11 @@ import { TileStore, type Manifest } from './core/tilestore';
 import { asteroidOrbit, cometOrbit, orbitPosition, parseAsteroids, type AsteroidSet, type Comet, type Orbit } from './core/smallbodies';
 import { AU, SUN_RADIUS, SolarSystem } from './render/world';
 import { CameraRig, SCENE_BASIS, type Anchor, type Frame } from './render/camera';
-import { Globe, type GlobeFrame } from './render/globe';
+import { Globe, type GlobeFrame, type SurfaceKind } from './render/globe';
 import { EarthSky } from './render/sky';
 import { discOverlap } from './render/shadow';
 import { SmallBodies } from './render/smallbodies';
+import { albedoScale } from './render/planets';
 import { StarField, makeSingleStar, type DustGrid } from './render/stars';
 import { Constellations, type ConstellationData } from './render/constellations';
 import { StarGlobe } from './render/starglobe';
@@ -63,6 +64,10 @@ const SOLAR_RADIUS = 695700;
 const DIFFUSE_GAIN = 3;
 /** Mars tiles store twice the surface's normal albedo (pipeline/build_surfaces.py). */
 const MARS_ALBEDO_SCALE = 0.5;
+/** Worlds with terrain tiles besides Earth, the Moon and Mars (pipeline/build_worlds.py). */
+const WORLDS = (manifest as unknown as { worlds?: { body: number; name: string; radius: number; mean: Vec3 }[] }).worlds ?? [];
+/** A world's terrain replaces its plain globe once it is this many pixels across. */
+const TERRAIN_PIXELS = 48;
 
 interface Surface {
   globe: Globe;
@@ -99,7 +104,15 @@ interface Site {
   dist: number;
   heading: number;
   tilt: number;
+  /** Named features (IAU): size, km. */
+  diameter?: number;
 }
+
+/** Named surface features of the worlds with terrain (pipeline/build_features.py). */
+interface FeatureData {
+  bodies: Record<string, [name: string, lat: number, lon: number, diameter: number, type: string][]>;
+}
+const FEATURES: Site[] = [];
 
 const SITES: Site[] = [
   // 25 m west of Eagle's descent stage (see `eagle` below), facing it.
@@ -109,17 +122,20 @@ const SITES: Site[] = [
   { name: 'Grand Canyon (Mather Point)', aliases: ['grand canyon', 'mather point'], body: 399, lat: 36.0618, lon: -112.1076, dist: 0.3, heading: 0, tilt: 10 },
 ];
 
-/** The nearest site on a body within 50 km: name, distance (km) and compass direction. */
+/**
+ * The nearest site on a body within 50 km, or named feature within its own size (and
+ * at least 50 km): name, distance (km) and compass direction.
+ */
 function nearestSite(body: number, lon: number, lat: number): { name: string; distance: number; direction: string } | undefined {
   const DEG = Math.PI / 180;
   let best: { name: string; distance: number; direction: string } | undefined;
-  for (const site of SITES) {
+  const R = bodyById(body).radius[0];
+  for (const site of [...SITES, ...FEATURES]) {
     if (site.body !== body) continue;
-    const R = bodyById(body).radius[0];
     const dLat = site.lat * DEG - lat, dLon = ((site.lon * DEG - lon + 3 * Math.PI) % (2 * Math.PI)) - Math.PI;
     const n = dLat * R, e = dLon * Math.cos(lat) * R;
     const distance = Math.hypot(n, e);
-    if (distance > 50 || (best && distance > best.distance)) continue;
+    if (distance > Math.max(50, site.diameter ?? 0) || (best && distance > best.distance)) continue;
     const az = (Math.atan2(e, n) / DEG + 360) % 360;
     best = { name: site.name.replace(/ \(.*\)$/, ''), distance, direction: distance < 0.002 ? 'here' : ['north', 'northeast', 'east', 'southeast', 'south', 'southwest', 'west', 'northwest'][Math.round(az / 45) % 8] };
   }
@@ -248,7 +264,7 @@ async function main() {
     for (const b of BODIES) if (b.id === planet || b.orbit?.around === planet) requestMap(b.map);
   };
 
-  // ---- surfaces with terrain: Earth, the Moon, Mars ---------------------------
+  // ---- surfaces with terrain: Earth, the Moon, Mars and every other solid world -----
   const store = new TileStore(manifest as unknown as Manifest, `${BASE}data/tiles/`);
   const surfaces = new Map<number, Surface>();
   /** Body-fixed to scene rotation: the measured one for Earth and the Moon, else the IAU model. */
@@ -257,10 +273,18 @@ async function main() {
     if (hasRotation(id)) return iauBodyToScene(id, tdb, out);
     return undefined;
   };
-  for (const [id, shape, kind, albedoScale] of [[399, WGS84, 'earth', 1], [301, MOON_SPHERE, 'airless', 0.4], [499, MARS_SPHERE, 'mars', MARS_ALBEDO_SCALE]] as const) {
+  // The other worlds (pipeline/build_worlds.py): a reference sphere, and their tiles'
+  // mean colour, scaled to the body's albedo as its distant globe is (planets.ts).
+  const terrain: [number, Shape, SurfaceKind, Vec3][] = [
+    [399, WGS84, 'earth', [1, 1, 1]],
+    [301, MOON_SPHERE, 'airless', [0.4, 0.4, 0.4]],
+    [499, MARS_SPHERE, 'mars', [MARS_ALBEDO_SCALE, MARS_ALBEDO_SCALE, MARS_ALBEDO_SCALE]],
+    ...WORLDS.map((w): [number, Shape, SurfaceKind, Vec3] => [w.body, { a: w.radius, b: w.radius }, 'airless', albedoScale(bodyById(w.body), w.mean)]),
+  ];
+  for (const [id, shape, kind, albedo] of terrain) {
     if (!store.hasBody(id) || !rotationAt(id, clock.tdb, new Float64Array(9))) continue;
     const globe = new Globe(id, shape, store, kind);
-    globe.uniforms.uAlbedoScale.value = albedoScale;
+    globe.uniforms.uAlbedoScale.value.set(...albedo);
     // Close-up grain on bare rock; Earth's ground is too varied for one texture.
     globe.uniforms.uDetail.value = kind === 'earth' ? 0 : 1;
     if (id === 301) globe.uniforms.uEclTint.value.set(0.02, 0.006, 0.002);
@@ -272,7 +296,22 @@ async function main() {
     scene.add(globe.group);
     surfaces.set(id, surface);
   }
-  const hidden = new Set(surfaces.keys()); // drawn by terrain instead of a plain globe
+  /** Bodies drawn by terrain instead of a plain globe (the other worlds only up close). */
+  const hidden = new Set([399, 301, 499].filter((id) => surfaces.has(id)));
+  const WORLD_IDS = new Set(WORLDS.map((w) => w.body));
+  /** The body whose shadow can fall on this one. */
+  const eclipser = (id: number) => {
+    if (id === 399) return 301;
+    if (id === 301) return 399;
+    if (id === 499) return 401;
+    if (id === 999) return 901;
+    const around = findBody(id)?.orbit?.around;
+    return around !== undefined && around !== 10 ? around : -1;
+  };
+  const meanRadius = (id: number) => {
+    const r = bodyById(id).radii;
+    return (r[0] + r[1] + r[2]) / 3;
+  };
 
   // ---- asteroids and comets -----------------------------------------------------
   const smallBodies = asteroids ? new SmallBodies(asteroids, comets, renderer.getPixelRatio()) : undefined;
@@ -548,6 +587,27 @@ async function main() {
     return o;
   }));
   const findSite = (q: string) => SITES.find((site) => site.name.toLowerCase() === q || site.aliases.includes(q));
+  /** A named feature by "Name (World)" or just its name (the largest of that name). */
+  const findFeature = (q: string) => FEATURES.find((f) => f.name.toLowerCase() === q) ?? FEATURES.find((f) => f.aliases[0] === q);
+  // Named features on every world with terrain: fly there, then land or walk.
+  fetch(`${BASE}data/features.json`).then((r) => r.json()).then((data: FeatureData) => {
+    const added: HTMLOptionElement[] = [];
+    for (const [key, list] of Object.entries(data.bodies)) {
+      const body = Number(key);
+      if (!surfaces.has(body)) continue;
+      const world = bodyById(body);
+      for (const [name, lat, lon, diameter, type] of list) {
+        // Big features are seen from high up, small ones from low over their rim.
+        const dist = Math.min(Math.max(1.6 * diameter, 2), 2 * world.radius[0]);
+        FEATURES.push({ name: `${name} (${world.name})`, aliases: [name.toLowerCase()], body, lat, lon, dist, heading: 0, tilt: diameter > 300 ? 60 : 35, diameter });
+        const o = document.createElement('option');
+        o.value = `${name} (${world.name})`;
+        o.label = `${type.toLowerCase()} on ${world.name}${diameter ? ` · ${diameter < 10 ? diameter.toFixed(1) : Math.round(diameter)} km` : ''}`;
+        added.push(o);
+      }
+    }
+    options.append(...added);
+  }).catch(() => undefined);
   const flyToSite = (site: Site) => {
     prepare(site.body);
     waitFor(() => system.available(site.body), 30000).then(() => {
@@ -567,7 +627,7 @@ async function main() {
   const go = () => {
     const q = search.value.trim().toLowerCase();
     if (!q) return;
-    const site = findSite(q);
+    const site = findSite(q) ?? (byName.has(q) ? undefined : findFeature(q));
     if (site) {
       search.value = site.name;
       search.blur();
@@ -1196,7 +1256,7 @@ async function main() {
 
   // ---- on foot ------------------------------------------------------------------
   // Land the ship, step outside (or "Walk here" from a low view) and walk on the
-  // Moon, Mars or Earth at their true gravity (core/walker.ts).
+  // ground of any solid world at its true gravity (core/walker.ts).
   const walkControls = new WalkControls({
     board: () => board(),
     exit: () => setWalking(undefined),
@@ -1287,7 +1347,7 @@ async function main() {
     const body = ship.landed;
     const s = body !== undefined ? surfaces.get(body) : undefined;
     if (body === undefined || !s || ship.ref !== body) {
-      hud.say('Land first: set down on the Moon, Mars or Earth, then O steps outside');
+      hud.say('Land first: set down on a world with a solid surface, then O steps outside');
       return;
     }
     const p = bodyVector(s, ship.rel);
@@ -1770,17 +1830,29 @@ async function main() {
     for (const [id, s] of surfaces) {
       const centre = system.position(id);
       const centerRel = sub(centre, eye, [0, 0, 0]);
+      // The other worlds draw as terrain only once they are big enough on screen to
+      // need it; until then their plain globe (planets.ts) stands in and no tiles load.
+      if (!hidden.has(id) || WORLD_IDS.has(id)) {
+        const big = system.available(id) && (s.shape.a / length(centerRel)) * ppr > TERRAIN_PIXELS / 2;
+        s.globe.group.visible = big;
+        if (big) hidden.add(id);
+        else {
+          hidden.delete(id);
+          continue;
+        }
+      }
       const eyeBody = bodyVector(s, [-centerRel[0], -centerRel[1], -centerRel[2]]);
       sub(sunPos, centre, sunScene);
       const sunBody = bodyVector(s, sunScene);
       const len = length(sunBody);
-      // Eclipses: the Moon's shadow on Earth, Earth's on the Moon, Phobos's on Mars.
-      const other = id === 399 ? 301 : id === 301 ? 399 : 401;
+      // Eclipses: the Moon's shadow on Earth, Earth's on the Moon, Phobos's on Mars, a
+      // planet's on its moons, Pluto's and Charon's on each other.
+      const other = eclipser(id);
       const u = s.globe.uniforms;
       u.uEclSun.value.set(sunBody[0], sunBody[1], sunBody[2]);
       u.uEclSunRadius.value = SUN_RADIUS;
-      const occ = bodyVector(s, sub(system.position(other), centre, [0, 0, 0]));
-      const occRadius = !system.available(other) ? 0 : other === 301 ? 1737.4 : other === 399 ? 6371.0 : 11.08;
+      const occ = other < 0 ? [0, 0, 0] : bodyVector(s, sub(system.position(other), centre, [0, 0, 0]));
+      const occRadius = other < 0 || !system.available(other) ? 0 : other === 301 ? 1737.4 : other === 399 ? 6371.0 : other === 401 ? 11.08 : meanRadius(other);
       u.uEclOcc.value.set(occ[0], occ[1], occ[2], occRadius);
       u.uSunIntensity.value = system.intensity(id);
       const f: GlobeFrame = { eyeBody, centerRel, bodyToScene: s.bodyToScene, sunBody: [sunBody[0] / len, sunBody[1] / len, sunBody[2] / len], pixelsPerRadian: ppr, frame: frameNumber, frustum };
@@ -1869,7 +1941,7 @@ async function main() {
     // Like the eye, adapt to the body in view: bright clouds and ice get less exposure,
     // dark rock more (Earth and the Moon keep the exposure their maps were made for).
     const focusBody = findBody(rig.focus);
-    if (focusBody && !surfaces.has(focusBody.id) && focusBody.id !== 10 && (!ship || rig.distance < 30 * focusBody.radius[0])) {
+    if (focusBody && (!surfaces.has(focusBody.id) || WORLD_IDS.has(focusBody.id)) && focusBody.id !== 10 && (!ship || rig.distance < 30 * focusBody.radius[0])) {
       exposureTarget *= Math.min(2, Math.max(0.2, 0.11 / focusBody.albedo));
     }
     // In another body's shadow (totality, a lunar eclipse) the eye adapts to the dark.
@@ -1941,6 +2013,17 @@ async function main() {
       label.classList.toggle('focus', id === rig.focus);
     };
     /** True if a nearer globe hides the point (camera-relative). */
+    // Standing on a world with terrain, its ground hides what is below the horizon: the
+    // sphere through the ground underfoot (on Ceres or Vesta the smallest radius is tens
+    // of km below it).
+    const focusSurface = surfaces.get(rig.focus);
+    let groundRadius = 0;
+    if (focusSurface && hidden.has(rig.focus)) {
+      const local = bodyVector(focusSurface, sub(eye, system.position(rig.focus), [0, 0, 0]));
+      const [lon, lat, h] = bodyToGeodetic(focusSurface.shape, local);
+      const ground = focusSurface.globe.heightAt(lon, lat);
+      if (h - ground < 20) groundRadius = length(local) - (h - ground) - 0.001;
+    }
     const hiddenBehind = (id: number, p: Vec3) => {
       const dp = length(p);
       for (const b of BODIES) {
@@ -1948,7 +2031,7 @@ async function main() {
         const c = sub(system.position(b.id), eye, rel);
         const along = dot(c, p) / dp;
         if (along <= 0 || along >= dp) continue;
-        const r = Math.min(b.radii[0], b.radii[2]);
+        const r = b.id === rig.focus && groundRadius > 0 ? groundRadius : Math.min(b.radii[0], b.radii[2]);
         if (dot(c, c) - along * along < r * r) return true;
       }
       return false;
@@ -1962,7 +2045,21 @@ async function main() {
       const along = dot(focusCentre, d) / length(d);
       return along > 0 && along < length(d) && dot(focusCentre, focusCentre) - along * along < focus.radius ** 2;
     };
-    const skyHidden = (p: Vec3) => daylight > 0.6 || hiddenBehind(-1, sub(p, eye, skyDir)) || behindFocus(skyDir);
+    // On the ground, hills and mountains hide the sky behind them too: step out along
+    // the line of sight and see whether it passes under the terrain.
+    const marchStep: Vec3 = [0, 0, 0];
+    const behindTerrain = (d: Vec3) => {
+      if (groundRadius <= 0 || !focusSurface) return false;
+      const centre = system.position(rig.focus);
+      const len = length(d);
+      for (let km = 0.25; km < 0.2 * focusSurface.shape.a; km *= 2) {
+        for (let k = 0; k < 3; k++) marchStep[k] = eye[k] + (d[k] / len) * km - centre[k];
+        const [lon, lat, h] = bodyToGeodetic(focusSurface.shape, bodyVector(focusSurface, marchStep));
+        if (h < focusSurface.globe.heightAt(lon, lat)) return true;
+      }
+      return false;
+    };
+    const skyHidden = (p: Vec3) => daylight > 0.6 || hiddenBehind(-1, sub(p, eye, skyDir)) || behindFocus(skyDir) || behindTerrain(skyDir);
     const smallFocus = rig.focus >= ASTEROID_ID && !isHole(rig.focus);
     focusLabel.textContent = smallFocus ? focus.name : '';
     if (smallFocus) place(rig.focus, focusLabel, positionOf(rig.focus), false);

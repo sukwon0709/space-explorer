@@ -2,7 +2,7 @@ import type { Vec3 } from './ephemeris';
 import { bodyToGeodetic, enu, geodeticToBody, type Shape } from './geodesy';
 
 /**
- * Someone on foot on the Moon, Mars or Earth. Everything is in the body-fixed frame,
+ * Someone on foot on a solid world (Earth, the Moon, Mars, Mercury, moons, dwarf planets). Everything is in the body-fixed frame,
  * which turns with the body, so the walker feels the body's gravity plus the
  * centrifugal and Coriolis accelerations of standing on a spinning world:
  *   a = -GM p/|p|^3 - w x (w x p) - 2 w x v.

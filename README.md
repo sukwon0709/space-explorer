@@ -4,7 +4,30 @@ A real-time 3D simulator for travelling from Earth through the Solar System and 
 
 The full plan, including the roadmap, lives in the [design doc](https://claude.ai/code/artifact/c235450b-21cd-41a8-bc4b-b69ca4239c84).
 
-## Star systems (this code)
+## Land anywhere (this code)
+
+**Every solid world in the Solar System has terrain you can land on and walk.** Besides Earth, the Moon and Mars: Mercury, Ceres, Vesta, Phobos, Io, Europa, Ganymede, Callisto, Enceladus, Tethys, Dione, Rhea, Iapetus, Triton, Pluto and Charon. Fly the ship down and press O, or press `Walk here` near the ground. Walking pace and jumps follow each world's gravity (0.006 m/s² on Phobos, 0.25 on Ceres, 3.7 on Mercury).
+
+- **Real maps up close** (`pipeline/build_worlds.py`). Each world's USGS global mosaic at full resolution (Mercury 935 m per pixel, Europa 600 m, the rest 0.5 to 2 km), processed like its distant map so the ground matches the globe seen from afar. Areas never photographed (most of Pluto's and Charon's far sides, Triton's north) are each row's average, as on the distant maps.
+- **Real heights where they were measured**: MESSENGER stereo for Mercury, Dawn stereo for Ceres and Vesta, Mars Express for Phobos, Cassini for Enceladus, New Horizons stereo for Pluto's and Charon's encounter hemispheres (fading into the IAU ellipsoid where it ends). Moons without an elevation model are their IAU ellipsoid (Iapetus 34 km flatter at the poles), with no relief.
+- **Named places** (`pipeline/build_features.py`). The search box knows 6,306 IAU-named features on these worlds plus the Moon and Mars: craters, mountains, plains, chasms (`Occator`, `Ahuna Mons`, `Sputnik Planitia`, `Copernicus`, `Olympus Mons`). Pick one to fly there; on foot, the HUD names the nearest one.
+- **Shadows**: a planet's shadow falls on its moons (Jupiter's on Io), and Pluto's and Charon's on each other.
+- Each world switches from its plain globe to terrain once it is 48 pixels across, so far-off worlds cost nothing.
+- **Gate** (`tests/worlds.test.ts`), against published measurements:
+  - Mercury: Rachmaninoff basin floor -5.35 km (Becker et al. 2016: -5.38 km, Mercury's lowest point).
+  - Ceres: Ahuna Mons 5.2 km above the ground 25 km out (Ruesch et al. 2016: 4 km on average, 5 km at its highest).
+  - Vesta: Rheasilvia's central peak 17.6 km above the average basin floor (Schenk et al. 2012: 20 to 25 km; the average floor sits above its lowest parts).
+  - Pluto: Sputnik Planitia 2.8 km below the uplands around it (Schenk et al. 2018: 2.5 to 3.5 km).
+  - Iapetus' ellipsoid, and surface gravity on Mercury, Europa, Ceres and Pluto against NASA's values.
+
+### Limits
+
+- Venus and Titan have no terrain yet: their surfaces are under thick atmospheres the renderer doesn't draw from below.
+- Detail stops at the data: heights are 0.4 km (Vesta) to 3.7 km (Mercury) apart and pictures 0.6 to 2 km per pixel, so on foot the ground near you is smooth with only a fine grain. Only Tranquility Base and Jezero have metre-scale terrain.
+- Gravity points at the centre (a point mass plus spin). On lumpy Vesta and Phobos real gravity is tilted from that by several degrees, and Mars' tide on Phobos is left out.
+- Tiles add 220 MB to the site.
+
+## Star systems
 
 **Visit other stars and their planets.** Pick one from `Star systems…` (25 systems: Alpha Centauri, Proxima, Barnard's Star, Sirius, TRAPPIST-1, 55 Cancri, HD 189733 and more) or search any of the 5,991 known exoplanets or their 4,417 stars by name. In the ship, a planet or companion star is a destination like any other: X flies you there under its real gravity.
 
@@ -32,7 +55,7 @@ New URL parameter values: `focus` takes planets and companions (`?focus=TRAPPIST
 
 ## Landing, walking and sky events
 
-**Landing and walking.** Set the ship down on the Moon, Mars or Earth and press O (or `Out`) to step outside, or press `Walk here` near the ground anywhere with terrain (`?walk=1` starts on foot). You walk in first person at the true surface gravity.
+**Landing and walking.** Set the ship down on the Moon, Mars or Earth (now any solid world, see above) and press O (or `Out`) to step outside, or press `Walk here` near the ground anywhere with terrain (`?walk=1` starts on foot). You walk in first person at the true surface gravity.
 
 - **Physics** (`src/core/walker.ts`). Walking happens in the body's rotating frame: its gravity, plus the centrifugal and Coriolis effects of the spin. Your walking pace follows from gravity. Walking is an inverted pendulum, and people walk at Froude number v²/(gL) = 0.25 and run at about 2.5, on Earth and in the Apollo footage alike. That gives a walk of 1.5 m/s on Earth, 0.9 m/s on Mars and 0.6 m/s on the Moon. Your feet only push through friction (μ = 0.6), so on the Moon starting, stopping and turning are slow. A jump leaves the ground at 3.1 m/s, the take-off speed of a 0.5 m jump on Earth. That is 3 m high and almost 4 s in the air on the Moon, and 1.3 m on Mars. Slopes steeper than 35° can't be climbed.
 - **Controls.** W/S/A/D walk, Shift runs, Space jumps, drag or the arrow keys look around, B boards the ship when it is within 20 m, and Esc stops walking. Phones get on-screen buttons.
@@ -304,6 +327,11 @@ python3 pipeline/build_nebula_detail.py $DATA public/data   # nebula close-ups: 
 python3 pipeline/build_galaxy_models.py $DATA public/data   # 3D galaxies: SDSS DR9 / DSS2 (+ Pan-STARRS DR1 for Andromeda) via hips2fits, Gaia DR3; writes tests/fixtures/galaxy-models-reference.json
 python3 pipeline/build_cmb.py $DATA public/data
 
+# Every other solid world: USGS global mosaics and elevation models; IAU feature names
+python3 pipeline/fetch_worlds.py $DATA/worlds
+python3 pipeline/build_worlds.py $DATA/worlds public/data/tiles src/generated/tiles.json   # --only mercury,pluto
+python3 pipeline/build_features.py $DATA public/data/features.json
+
 # Mars, Tranquility Base and Jezero crater: MOLA, Viking, LRO NAC, Mars 2020 CTX and HiRISE
 python3 pipeline/fetch_surfaces.py $DATA/surf
 python3 pipeline/build_surfaces.py $DATA/surf public/data/tiles src/generated/tiles.json   # --only mars,apollo11,jezero
@@ -340,6 +368,8 @@ Tiles are geographic: level L has 2^(L+1) × 2^L tiles of 180/2^L degrees. Colou
 - IAU WGCCRE 2015 report on cartographic coordinates and rotational elements (radii, poles, rotation), via NAIF pck00011.
 - NAIF satellite ephemerides mar099, jup365, sat441, ura184, nep097, plu060 (Jacobson et al.) and JPL's sb441-n16 asteroid ephemeris.
 - USGS Astrogeology global mosaics: MESSENGER MDIS (NASA/JHUAPL/CIW), Viking Orbiter, Mars Express SRC (ESA/DLR/FU Berlin), Galileo SSI and Voyager, Cassini ISS (NASA/JPL), Dawn FC (NASA/JPL, DLR), New Horizons LORRI (NASA/JHUAPL/SwRI).
+- USGS Astrogeology global elevation models: MESSENGER MLA/MDIS stereo DEM of Mercury (Becker et al. 2016), Dawn HAMO/LAMO DEMs of Ceres and Vesta (DLR), Phobos shape from Mars Express HRSC, Enceladus shape model (Bland et al. 2019), New Horizons DEMs of Pluto and Charon (Schenk et al. 2018).
+- Gazetteer of Planetary Nomenclature (IAU Working Group for Planetary System Nomenclature and USGS Astrogeology): names, centres and sizes of surface features.
 - Hubble OPAL global maps of Jupiter, Saturn, Uranus and Neptune (Simon et al., MAST HLSP); Uranus and Neptune true colours from Irwin et al. 2024.
 - Cassini RSS Saturn ring occultation, Rev 7 (PDS Ring-Moon Systems Node, CORSS_8001).
 - SDO/HMI continuum intensitygram (NASA/SDO and the HMI science team).
