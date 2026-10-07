@@ -11,7 +11,7 @@ html, body { margin: 0; height: 100%; background: #000; color: var(--ink); font:
 #focus-name { font-size: 20px; font-weight: 600; }
 #focus-detail { color: var(--quiet); white-space: pre-line; }
 #bodies { position: fixed; top: 16px; right: 16px; display: flex; flex-direction: column; gap: 4px; }
-#bodies button, #layers button, #timebar button, #search, #date, #events, #tours, #tour button { background: var(--panel); color: var(--ink); border: 1px solid rgba(255,255,255,0.12); border-radius: 6px; padding: 5px 10px; font: inherit; cursor: pointer; }
+#bodies button, #layers button, #timebar button, #search, #systems, #date, #events, #tours, #tour button { background: var(--panel); color: var(--ink); border: 1px solid rgba(255,255,255,0.12); border-radius: 6px; padding: 5px 10px; font: inherit; cursor: pointer; }
 #bodies button.focus, #layers button.active, #timebar button.active { border-color: var(--accent); color: var(--accent); }
 #timebar { position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%); display: flex; gap: 4px; align-items: center; padding: 6px; background: var(--panel); border-radius: 8px; max-width: calc(100vw - 32px); overflow-x: auto; }
 #utc { padding: 0 10px; font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -22,9 +22,9 @@ html, body { margin: 0; height: 100%; background: #000; color: var(--ink); font:
 }
 .label.satellite { color: #ffd27a; opacity: 0.85; pointer-events: none; }
 .label.satellite::before { border: none; width: 0; }
-#search { width: 150px; margin-bottom: 4px; }
+#search, #systems { width: 150px; margin-bottom: 4px; }
 #search.miss { border-color: #ff7a7a; }
-#date, #events, #tours { padding: 4px 6px; color-scheme: dark; }
+#date, #events, #tours, #systems { padding: 4px 6px; color-scheme: dark; }
 .label.moon, .label.asteroid { font-size: 12px; opacity: 0.85; }
 .label.moon::before, .label.asteroid::before { width: 5px; height: 5px; }
 .label.smallbody { color: #9fe3ff; }
