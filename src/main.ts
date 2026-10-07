@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { Ephemeris } from './core/ephemeris';
 import { Orientation } from './core/orientation';
 import { BODIES, RINGS, SYSTEMS, bodyById, findBody, type Body } from './core/bodies';
-import { Clock, utcToTdb } from './core/time';
+import { Clock, tdbToUtc, utcToTdb } from './core/time';
 import { parseSatellites, type SatelliteSnapshot } from './core/satellites';
 import { icrfToScene, length, raDecToIcrf, sceneToIcrf, sub } from './core/frames';
 import type { Vec3 } from './core/ephemeris';
@@ -39,6 +39,11 @@ import { formatDistance, formatUtc } from './ui/format';
 import { eventGroups, type EventCatalogue, type SkyEvent } from './ui/events';
 import eventCatalogue from './generated/events.json';
 import { Visitor } from './render/visitors';
+import { Trajectory, SOI, type BodyPosition } from './core/mission';
+import { MissionView } from './render/mission';
+import { MISSIONS } from './ui/missions';
+import { MissionPanel, type MissionData, type Moment } from './ui/missionpanel';
+import missionCatalogue from './generated/missions.json';
 import { TOURS, TourPlayer, type TourStep } from './ui/tours';
 import { FlightControls, FlightHud } from './ui/flight';
 import { WalkControls } from './ui/walk';
@@ -61,6 +66,9 @@ const ASTEROID_ID = 30_000_000;
 const COMET_ID = 40_000_000;
 /** Named stars (stars/named.json) get ids from here, plus their index. */
 const STAR_ID = 50_000_000;
+/** Spacecraft on their missions (ui/missions.ts), by index. */
+const CRAFT_ID = 45_000_000;
+const MISSION_DATA = missionCatalogue as unknown as Record<string, MissionData>;
 const SOLAR_RADIUS = 695700;
 /** How much deeper (magnitudes) diffuse light is shown than point sources. */
 const DIFFUSE_GAIN = 3;
@@ -385,6 +393,12 @@ async function main() {
   for (const t of deep.targets) targets.set(t.id, { id: t.id, name: t.name, kind: t.kind, radius: t.radius });
   for (const t of bhs.targets) targets.set(t.id, { id: t.id, name: t.name, kind: t.kind, radius: t.radius });
   for (const t of sys.targets) targets.set(t.id, { id: t.id, name: t.name, kind: t.kind, radius: t.radius });
+  MISSIONS.forEach((m, k) => {
+    if (MISSION_DATA[m.slug]) targets.set(CRAFT_ID + k, { id: CRAFT_ID + k, name: m.name, kind: 'spacecraft', radius: 0.005 });
+  });
+  const isCraft = (id: number) => id >= CRAFT_ID && id < CRAFT_ID + MISSIONS.length;
+  /** The spacecraft being followed, once its trajectory has loaded. */
+  let missionView: MissionView | undefined;
   const isHole = (id: number) => bhs.has(id);
   const isStar = (id: number) => id >= STAR_ID && id < STAR_ID + namedStars.length;
   /** A companion star or exoplanet (systems.ts). */
@@ -397,6 +411,12 @@ async function main() {
     if (isDeep(id)) return deep.position(id, out);
     if (isHole(id)) return bhs.position(id, out);
     if (isStar(id) || isSys(id)) return sys.position(id, clock.tdb, out);
+    if (isCraft(id)) {
+      if (missionView && missionView.mission === MISSIONS[id - CRAFT_ID]) return missionView.position(clock.tdb, out);
+      const e = system.position(399);
+      out[0] = e[0]; out[1] = e[1]; out[2] = e[2];
+      return out;
+    }
     const orbit = smallOrbits.get(id);
     if (!orbit) {
       const p = system.position(id);
@@ -578,6 +598,10 @@ async function main() {
   /** In the ship, picking a name sets the destination instead of flying there. */
   let pick: ((id: number) => boolean) | undefined;
   const flyTo = (id: number) => {
+    if (isCraft(id)) {
+      startMission(id - CRAFT_ID);
+      return;
+    }
     prepare(id);
     if (pick?.(id)) return;
     waitFor(() => id >= ASTEROID_ID || system.available(id), 30000).then(() => {
@@ -631,7 +655,8 @@ async function main() {
     else if (isStar(t.id)) {
       const star = starOf(t.id);
       o.label = [star.desig, star.host, star.planets ? `${star.planets.length} planet${star.planets.length > 1 ? 's' : ''}` : ''].filter(Boolean).join(' · ') || 'star';
-    } else if (t.id >= ASTEROID_ID) o.label = t.id >= COMET_ID ? 'comet' : t.kind;
+    } else if (isCraft(t.id)) o.label = 'spacecraft · ride along';
+    else if (t.id >= ASTEROID_ID) o.label = t.id >= COMET_ID ? 'comet' : t.kind;
     return o;
   }));
   const findSite = (q: string) => SITES.find((site) => site.name.toLowerCase() === q || site.aliases.includes(q));
@@ -1705,6 +1730,269 @@ async function main() {
     hud.set(out);
   };
 
+  // ---- spacecraft missions ---------------------------------------------------
+  // Ride along with a spacecraft on its navigated trajectory (core/mission.ts): pick one
+  // from the menu or search, follow it through its flybys, and jump between moments.
+  const at: BodyPosition = (id, tdb, out) => ephemeris.position(id, tdb, out);
+  const missionSelect = document.getElementById('missions') as HTMLSelectElement;
+  MISSIONS.forEach((m, k) => {
+    const data = MISSION_DATA[m.slug];
+    if (!data) return;
+    const o = document.createElement('option');
+    o.value = String(k);
+    const from = new Date(tdbToUtc(data.start)).getUTCFullYear();
+    o.textContent = `${m.name} · ${from}`;
+    o.title = m.summary;
+    missionSelect.append(o);
+  });
+  let missionIndex = -1;
+  let missionPace = true;
+  /** Smoothed log of the paced clock rate. */
+  let paceLog = 0;
+  let craftLabel: HTMLElement | undefined;
+  const craftId = () => CRAFT_ID + missionIndex;
+  /** Yaw and pitch that look along a scene direction (camera.ts conventions). */
+  const lookAlong = (d: Vec3): [number, number] => {
+    const l = length(d) || 1;
+    const up = d[1] / l;
+    return [Math.atan2(d[0] / l, -d[2] / l), -Math.asin(Math.max(-1, Math.min(1, up)))];
+  };
+  /**
+   * Fly the camera to just behind the spacecraft, looking along `dir`: by default at the
+   * body it is near, else at its sunlit side.
+   */
+  const followCraft = (dir?: Vec3, scale = 2.6) => {
+    if (!missionView) return;
+    const c = localBody(clock.tdb);
+    // Near the Sun (Parker), look past the craft at it, a little from the side so the
+    // sunlit heat shield shows; elsewhere at the body the craft is passing.
+    let side = 0;
+    if (!dir && c === 10) {
+      const toSun = sub(missionView.bodyAt(10, clock.tdb), missionView.position(clock.tdb), [0, 0, 0]);
+      if (Math.hypot(...toSun) < 0.3 * AU) {
+        dir = toSun;
+        side = 0.35;
+      }
+    }
+    if (!dir && c !== 10 && ephemeris.available(c, clock.tdb)) dir = sub(missionView.bodyAt(c, clock.tdb), missionView.position(clock.tdb), [0, 0, 0]);
+    const [yaw, pitch] = dir ? lookAlong(dir) : sunlitView(craftId());
+    rig.flyTo(craftId(), (missionView.size / 1000) * scale, performance.now() / 1000, yaw + side, dir ? pitch + 0.12 : 0.25, undefined, 3);
+    lookUp = 0;
+    fov = 50;
+    skyAim = undefined;
+    followSun = false;
+  };
+  /** Speed around the Sun through the mission, for the panel's chart. */
+  const speedCurve = (traj: Trajectory) => {
+    const n = 600;
+    const times = new Float64Array(n), speeds = new Float32Array(n);
+    const v: Vec3 = [0, 0, 0], a: Vec3 = [0, 0, 0], b: Vec3 = [0, 0, 0];
+    for (let k = 0; k < n; k++) {
+      const t = traj.start + ((traj.end - traj.start) * k) / (n - 1);
+      traj.velocity(t, at, v);
+      at(10, t + 0.5, a);
+      at(10, t - 0.5, b);
+      times[k] = t;
+      speeds[k] = Math.hypot(v[0] - (a[0] - b[0]), v[1] - (a[1] - b[1]), v[2] - (a[2] - b[2]));
+    }
+    return { times, speeds };
+  };
+  const endMission = () => {
+    if (missionView) scene.remove(missionView.group);
+    missionView = undefined;
+    missionIndex = -1;
+    missionPanel.close();
+    if (craftLabel) craftLabel.style.display = 'none';
+  };
+  const panelActions = {
+    jump: (m: Moment) => {
+      if (!missionView) return;
+      // Early enough to watch the approach: a few times the distance at the passing speed.
+      const lead = m.body !== undefined && m.distance && m.speed ? Math.min(20 * 86400, Math.max(900, (5 * m.distance) / m.speed)) : 600;
+      const t = Math.max(missionView.traj.start, m.tdb - lead);
+      clock.setUtc(tdbToUtc(t));
+      clock.paused = false;
+      setPace(true);
+      system.update(clock.tdb);
+      if (m.body !== undefined) {
+        prepare(m.body);
+        const d = sub(system.position(m.body), missionView.position(clock.tdb), [0, 0, 0]);
+        followCraft(d);
+      } else followCraft();
+      hud.say(m.body !== undefined ? `${m.title}: closest ${formatDistance(m.altitude ?? 0)} above ${bodyById(m.body).name} at ${formatSpeed(m.speed ?? 0)}` : m.title, 6);
+    },
+    seek: (tdb: number) => {
+      clock.setUtc(tdbToUtc(tdb));
+      followCraft();
+    },
+    pace: (on: boolean) => setPace(on),
+    follow: () => followCraft(),
+    close: () => endMission(),
+  };
+  const missionPanel = new MissionPanel(document.getElementById('mission')!, panelActions);
+  const setPace = (on: boolean) => {
+    missionPace = on;
+    missionPanel.setPace(on);
+  };
+  // Choosing a rate by hand turns pacing off.
+  rateButtons.forEach((b) => b.addEventListener('click', () => setPace(false)));
+  const startMission = async (k: number, startTdb?: number, view?: { dist?: number; yaw?: number; pitch?: number }, keepView = false) => {
+    const m = MISSIONS[k];
+    const data = MISSION_DATA[m.slug];
+    if (!m || !data) return;
+    setFlight(false);
+    setWalking(undefined);
+    tours.stop();
+    hud.say(`Loading ${m.name}…`, 3);
+    const buffer = await fetch(`${BASE}data/missions/${m.slug}.bin`).then((r) => {
+      if (!r.ok) throw new Error(`${r.status}`);
+      return r.arrayBuffer();
+    }).catch(() => undefined);
+    if (!buffer) {
+      hud.say(`Couldn't load ${m.name}'s trajectory`);
+      return;
+    }
+    const traj = new Trajectory(buffer);
+    // The planets it passes, with their moons, so they sit where the spacecraft met them.
+    for (const [id] of m.encounters) if (id !== 10) prepare(id);
+    if (missionView) scene.remove(missionView.group);
+    missionView = new MissionView(m, traj, at);
+    missionIndex = k;
+    scene.add(missionView.group);
+    targets.get(CRAFT_ID + k)!.radius = missionView.size / 2000;
+    if (!craftLabel) craftLabel = makeLabel(-7, '', 'label spacecraft');
+    craftLabel.textContent = m.name;
+    craftLabel.onclick = () => followCraft();
+    const t = Math.min(traj.end, Math.max(traj.start, startTdb ?? traj.start + 600));
+    clock.setUtc(tdbToUtc(t));
+    clock.paused = false;
+    setPace(startTdb === undefined || !params.has('rate'));
+    missionPanel.open(m, data, speedCurve(traj));
+    system.update(clock.tdb);
+    if (!keepView) followCraft();
+    if (view?.dist !== undefined) {
+      // A URL view: straight there.
+      rig.flyTo(craftId(), view.dist, performance.now() / 1000, view.yaw ?? rig.yaw, view.pitch ?? rig.pitch, undefined, 0.01);
+    }
+    hud.say(m.summary, 8);
+  };
+  missionSelect.addEventListener('change', () => {
+    const k = Number(missionSelect.value);
+    missionSelect.value = '';
+    missionSelect.blur();
+    if (MISSIONS[k]) startMission(k);
+  });
+  /** Bodies near the spacecraft worth pacing and pulling for: the Sun and its encounters. */
+  const craftBodies = () => (missionView ? [10, ...missionView.mission.encounters.map(([id]) => id)].filter((id, i, all) => all.indexOf(id) === i && ephemeris.available(id, clock.tdb)) : []);
+  const formatAccel = (kms2: number) => {
+    const ms2 = kms2 * 1000;
+    if (ms2 >= 0.1) return `${ms2.toPrecision(3)} m/s²`;
+    if (ms2 >= 1e-4) return `${(ms2 * 1000).toPrecision(3)} mm/s²`;
+    return `${(ms2 * 1e6).toPrecision(3)} µm/s²`;
+  };
+  /**
+   * The body whose sphere of influence the spacecraft is in (the Moon's inside Earth's),
+   * else the Sun: from the positions themselves, as the table switches centre only on
+   * its daily grid and can miss a short pass.
+   */
+  const localBody = (tdb: number): number => {
+    if (!missionView || !missionView.traj.covers(tdb)) return 10;
+    const p = missionView.position(tdb);
+    let best = 10;
+    for (const key of Object.keys(SOI)) {
+      const id = Number(key);
+      if (!ephemeris.available(id, tdb)) continue;
+      const b = missionView.bodyAt(id, tdb);
+      if (Math.hypot(p[0] - b[0], p[1] - b[1], p[2] - b[2]) < SOI[id] && (best === 10 || id === 301)) best = id;
+    }
+    return best;
+  };
+  const describeCraft = (eye: Vec3): string[] => {
+    if (!missionView) return ['Loading trajectory…'];
+    const v = missionView;
+    const m = v.mission;
+    const tdb = clock.tdb;
+    const out: string[] = [];
+    if (!v.traj.covers(tdb)) {
+      out.push(tdb < v.traj.start ? `Not launched yet: the trajectory starts ${new Date(tdbToUtc(v.traj.start)).toISOString().slice(0, 10)}` : 'The trajectory ends here');
+      return out;
+    }
+    const p = v.position(tdb), vel = v.velocity(tdb);
+    const rel = (id: number) => {
+      const b = v.bodyAt(id, tdb), b1 = v.bodyAt(id, tdb + 1);
+      return { d: Math.hypot(p[0] - b[0], p[1] - b[1], p[2] - b[2]), s: Math.hypot(vel[0] - (b1[0] - b[0]), vel[1] - (b1[1] - b[1]), vel[2] - (b1[2] - b[2])) };
+    };
+    const sun = rel(10);
+    out.push(`Spacecraft · ${formatDuration(tdb - v.traj.start)} into the mission`);
+    out.push(`${formatSpeed(sun.s)} around the Sun`);
+    const c = localBody(tdb);
+    if (c !== 10) {
+      const r = rel(c);
+      out.push(`${formatSpeed(r.s)} relative to ${bodyById(c).name}, ${formatDistance(r.d - bodyById(c).radius[0])} above it`);
+    } else {
+      const escape = Math.sqrt((2 * GM[10]) / sun.d);
+      out.push(`Escape speed from the Sun here ${formatSpeed(escape)}${sun.s > escape ? ': leaving the Solar System for good' : ''}`);
+    }
+    // What gravity is doing to it: the strongest pulls, GM/r².
+    const pulls = craftBodies().filter((id) => GM[id]).map((id) => {
+      const b = v.bodyAt(id, tdb);
+      const r2 = (p[0] - b[0]) ** 2 + (p[1] - b[1]) ** 2 + (p[2] - b[2]) ** 2;
+      return { id, a: GM[id] / r2 };
+    }).sort((x, y) => y.a - x.a).slice(0, 2);
+    out.push(`Gravity: ${pulls.map((g) => `${bodyById(g.id).name} ${formatAccel(g.a)}`).join(' · ')} (weightless on board: it all falls together)`);
+    const next = MISSION_DATA[m.slug].moments.find((x) => x.tdb > tdb);
+    if (next) out.push(`Next: ${next.title} in ${formatDuration(next.tdb - tdb)}${next.altitude !== undefined ? `, ${formatDistance(next.altitude)} up` : ''}`);
+    const earth = rel(399);
+    out.push(`Earth ${formatDistance(earth.d)} away: radio takes ${formatLightTime(earth.d)}`);
+    const predicted = m.predictedAfter && tdbToUtc(tdb) > Date.parse(m.predictedAfter);
+    out.push(predicted ? 'Path: the team’s planned trajectory (a prediction), JPL Horizons' : 'Path: as flown, reconstructed by its navigation team (JPL Horizons)');
+    void eye;
+    return out;
+  };
+  /** Each frame: draw the spacecraft and its path, pace the clock, label it. */
+  const updateMission = (eye: Vec3, ppr: number, dt: number) => {
+    if (!missionView) return;
+    const v = missionView;
+    const tdb = clock.tdb;
+    const p = v.position(tdb);
+    // The trail in the frame of the body the spacecraft is near, while the camera is too.
+    const c = localBody(tdb);
+    let frame = 10;
+    if (c !== 10 && ephemeris.available(c, tdb)) {
+      const b = v.bodyAt(c, tdb);
+      if (Math.hypot(eye[0] - b[0], eye[1] - b[1], eye[2] - b[2]) < 0.5 * (SOI[c] ?? 0)) frame = c;
+    }
+    v.update(tdb, eye, frame, system.position(10), system.position(399), system.exposure, ppr, true);
+    // Pacing: time runs so the spacecraft covers its own distance from the nearest body
+    // (or from the camera, zoomed out) in about six seconds; slow near planets, fast in
+    // cruise.
+    if (missionPace && !clock.paused && v.traj.covers(tdb)) {
+      let best = Infinity;
+      const vel = v.velocity(tdb);
+      for (const id of craftBodies()) {
+        const b = v.bodyAt(id, tdb), b1 = v.bodyAt(id, tdb + 1);
+        const alt = Math.max(1, Math.hypot(p[0] - b[0], p[1] - b[1], p[2] - b[2]) - (findBody(id)?.radius[0] ?? 0));
+        const speed = Math.max(0.01, Math.hypot(vel[0] - (b1[0] - b[0]), vel[1] - (b1[1] - b[1]), vel[2] - (b1[2] - b[2])));
+        best = Math.min(best, alt / speed);
+      }
+      const camera = rig.focus === craftId() ? rig.distance / Math.max(0.01, length(vel)) : 0;
+      const target = Math.log(Math.min(3e6, Math.max(1, Math.max(best, camera) / 6)));
+      paceLog = Number.isFinite(paceLog) && paceLog > 0 ? paceLog + (target - paceLog) * (1 - Math.exp(-3 * dt)) : target;
+      clock.rate = Math.round(Math.exp(paceLog));
+    }
+    if (tdb >= v.traj.end && clock.rate > 0 && !clock.paused) {
+      clock.paused = true;
+      syncRate();
+      hud.say(`${v.mission.name}: the trajectory ends here`, 6);
+    }
+    const from = tdbToUtc(v.traj.start);
+    missionPanel.update(tdb, missionPace ? `Auto pace: ${formatRate(clock.rate)} · launched ${new Date(from).toISOString().slice(0, 10)}` : `Launched ${new Date(from).toISOString().slice(0, 10)}`);
+  };
+  const formatRate = (r: number) => (r < 90 ? `${r}× real time` : r < 5400 ? `${Math.round(r / 60)} min a second` : r < 172800 ? `${(r / 3600).toFixed(1)} h a second` : `${(r / 86400).toFixed(0)} days a second`);
+  // Events and tours leave the spacecraft.
+  eventSelect.addEventListener('change', () => endMission(), { capture: true });
+  tourSelect.addEventListener('change', () => endMission(), { capture: true });
+
   // ---- frame loop -----------------------------------------------------------
   const nameEl = document.getElementById('focus-name')!;
   const detailEl = document.getElementById('focus-detail')!;
@@ -1749,6 +2037,17 @@ async function main() {
       const words = params.get('event')!.toLowerCase().split(/\s+/);
       const ev = eventList.find((e) => words.every((w) => e.title.toLowerCase().includes(w)));
       if (ev) playEvent(ev, params.has('t') ? startTime : undefined, params.has('rate') ? Number(params.get('rate')) : undefined);
+    }
+    // ?mission=voyager-2 rides along (t, dist, heading and tilt apply).
+    if (frameNumber === 2 && params.has('mission')) {
+      const k = MISSIONS.findIndex((m) => m.slug === params.get('mission'));
+      if (k >= 0) {
+        startMission(k, params.has('t') ? clock.tdb : undefined, params.has('dist') && !params.has('focus') ? {
+          dist: Number(params.get('dist')),
+          yaw: params.has('heading') ? Number(params.get('heading')) * DEG : undefined,
+          pitch: params.has('tilt') ? Number(params.get('tilt')) * DEG : undefined,
+        } : undefined, params.has('focus'));
+      }
     }
     if (frameNumber === 2 && params.get('fly') === '1') {
       setFlight(true);
@@ -2006,6 +2305,8 @@ async function main() {
     if (focusBody && (!surfaces.has(focusBody.id) || WORLD_IDS.has(focusBody.id)) && focusBody.id !== 10 && (!ship || rig.distance < 30 * focusBody.radius[0])) {
       exposureTarget *= Math.min(2, Math.max(0.2, 0.11 / focusBody.albedo));
     }
+    // A spacecraft's white dish and foil reflect about half the light.
+    if (isCraft(rig.focus)) exposureTarget *= 0.25;
     // Under Venus's clouds or Titan's haze the eye adapts to the dim light there, and to
     // the ground's own albedo rather than the clouds'.
     if (underAir && (!ship || rig.distance < 30 * (focusBody?.radius[0] ?? Infinity))) {
@@ -2036,6 +2337,7 @@ async function main() {
 
     // An asteroid or comet passing Earth (from an event).
     visitor?.update(earthRel, clock.tdb);
+    updateMission(eye, ppr, dt);
 
     // Orbit lines are a map of the system: they fade out close to a surface.
     let altitude = Infinity;
@@ -2136,7 +2438,7 @@ async function main() {
       return false;
     };
     const skyHidden = (p: Vec3) => daylight > 0.6 || hiddenBehind(-1, sub(p, eye, skyDir)) || behindFocus(skyDir) || behindTerrain(skyDir);
-    const smallFocus = rig.focus >= ASTEROID_ID && !isHole(rig.focus);
+    const smallFocus = rig.focus >= ASTEROID_ID && !isHole(rig.focus) && !isCraft(rig.focus);
     focusLabel.textContent = smallFocus ? focus.name : '';
     if (smallFocus) place(rig.focus, focusLabel, positionOf(rig.focus), false);
     else focusLabel.style.display = 'none';
@@ -2294,6 +2596,15 @@ async function main() {
       if (p) place(-6, visitorLabel, add(system.position(399), p), hiddenBehind(-6, sub(add(system.position(399), p), eye, [0, 0, 0])));
       else visitorLabel.style.display = 'none';
     }
+    if (craftLabel) {
+      const covered = missionView?.traj.covers(clock.tdb);
+      if (missionView && covered) {
+        const p = missionView.position(clock.tdb);
+        // Close up, the model speaks for itself.
+        const near = rig.focus === craftId() && rig.distance < (30 * missionView.size) / 1000;
+        place(craftId(), craftLabel, p, near || hiddenBehind(-7, sub(p, eye, [0, 0, 0])));
+      } else craftLabel.style.display = 'none';
+    }
     if (ship) updateFlightHud(ship, eye);
     if (walker) updateWalkHud(walker);
     drawLanders(eye);
@@ -2334,6 +2645,8 @@ async function main() {
         if (star.planets.length > 8) lines.push(`  and ${star.planets.length - 8} more`);
       }
       lines.push(star.gaia ? `Gaia DR3 ${star.gaia}` : `HIP ${star.hip} (Hipparcos)`);
+    } else if (isCraft(rig.focus)) {
+      lines.push(...describeCraft(eye));
     } else if (smallFocus) {
       lines.push(focus.kind === 'comet' ? 'Comet' : focus.kind);
       lines.push(`Camera ${formatDistance(rig.distance)} away`);

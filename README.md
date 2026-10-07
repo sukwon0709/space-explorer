@@ -4,7 +4,31 @@ A real-time 3D simulator for travelling from Earth through the Solar System and 
 
 The full plan, including the roadmap, lives in the [design doc](https://claude.ai/code/artifact/c235450b-21cd-41a8-bc4b-b69ca4239c84).
 
-## Venus and Titan (this code)
+## Spacecraft journeys (this code)
+
+**Ride along with 15 real spacecraft on the paths they actually flew.** Pick one from `Spacecraft…` or search its name: Voyager 1 and 2, Pioneer 10 and 11, Galileo, Cassini, New Horizons, Juno, Rosetta, Parker Solar Probe, OSIRIS-REx, Artemis I and II, JUICE and Lucy. The camera rides next to a model of the craft, the HUD reads out its speed, the gravity on it and the next encounter, and its path is drawn through space: solid where it has been, faint where it is going.
+
+- **Paths are the navigation teams' own reconstructions**, from JPL Horizons (`pipeline/fetch_missions.py`). The table stores position and velocity with a cubic Hermite between rows, placed so the path stays within 0.5 km of Horizons everywhere (rows every 2 seconds near a close pass, weeks apart in cruise). 6.9 MB for all 15.
+- **Each stretch is stored relative to the body it is near.** Horizons' Sun-relative path and its planet-relative path come from different reconstructions. Chained through the Sun, Voyager 2 misses Neptune by 33,400 km instead of the measured 29,240. So inside a planet's (or the Moon's) sphere of influence the table keeps the craft relative to that planet, and the app adds the planet's position from its own DE440. Every flyby is then exactly as close as the navigation team measured.
+- **Moments are found, not typed in** (`scripts/build-missions.mjs`). Every closest approach to the bodies a mission visited, against the app's own planets and moons, bisected to a millisecond. A pass slower than escape speed is an orbit (Perijove 12, Perikrone 150). A flyby lists the craft's speed around the Sun before and after, which is the gravity assist. A few dated events are added by hand: Huygens landing on Titan, the OSIRIS-REx capsule landing, the final plunges. Pick one from the panel to jump there a little early.
+- **Speed around the Sun over the whole flight** is charted in the panel; each gravity assist is a step in it, and each of Parker's perihelia a spike. Click it to go to that date.
+- **Auto pace** runs time fast in cruise and slows to real time near a close pass: about six seconds on screen per altitude-over-speed.
+- **Computed, not measured**: the models are simple shapes at the real sizes (Voyager's 3.7 m dish, Juno's 20 m wings), pointed at Earth with their panels turned to the Sun; Parker keeps its heat shield to the Sun and Orion flies nose first. Real attitude came from each mission's pointing data, which isn't used here.
+- **Gate** (`tests/missions.test.ts`):
+  - 141 held-out Horizons positions, between the table's rows and near close passes, within 1 km.
+  - Voyager 1 at Jupiter (348,890 km) and Saturn; Voyager 2 at all four giants (Neptune 29,240 km within 100 km and 5 minutes); Pioneer 10 at Jupiter; New Horizons at Pluto (13,690 km); Juno's Earth flyby (559 km up); Artemis II behind the Moon (6,545 km up); Parker's 22nd perihelion (6.9 million km at 191 km/s). All against NASA/JPL's published values.
+  - Centre switches cause no visible jump (under a thousandth of the distance).
+
+New URL parameter: `?mission=voyager-2&t=1989-08-25T02:40:00Z`.
+
+### Limits
+
+- Apollo isn't here: Horizons has only the Apollo S-IVB stages, not the crewed spacecraft. Artemis I and II stand in for crewed lunar flights.
+- After each mission's last reconstruction, Horizons gives the planned or predicted path (Juno, Parker, OSIRIS-APEX, JUICE and Lucy after their 2025-2026 updates, the Voyagers, Pioneers and New Horizons out to 2050 or 2060). The HUD says which.
+- Landers and probes released by a spacecraft (Huygens, Philae, the OSIRIS-REx capsule) aren't followed after release.
+- Pointing is computed, not each mission's real attitude.
+
+## Venus and Titan
 
 **You can now land on the two worlds whose ground no camera in orbit can see.** Fly below Venus's clouds (70 km) or Titan's haze (300 km) and the planet's cloud globe gives way to terrain, a sky the colour of the clouds, and air so thick the far ground fades out. Search `Venera 13` or `Huygens` to stand where the landers did, or any of 2,289 named features (`Maxwell Montes`, `Ligeia Mare`, `Selk`).
 
@@ -360,6 +384,11 @@ python3 pipeline/fetch_event_reference.py tests/fixtures/events-reference.json
 python3 pipeline/fetch_approaches.py public/data/events tests/fixtures/approaches-reference.json
 node scripts/build-events.mjs
 
+# Spacecraft: Horizons trajectories (about 1 h), their moments, and the held-out check
+python3 pipeline/fetch_missions.py public/data/missions      # or name some: voyager-2 cassini
+node scripts/build-missions.mjs
+python3 pipeline/make_mission_fixtures.py
+
 # Black holes: the S-stars and the EHT images
 python3 pipeline/fetch_blackholes.py $DATA public/data   # VizieR (Gillessen et al. 2017), ESO image archive
 ```
@@ -369,6 +398,7 @@ Tiles are geographic: level L has 2^(L+1) × 2^L tiles of 180/2^L degrees. Colou
 ## Data sources
 
 - JPL DE440 planetary ephemeris (Park et al. 2021); JPL Horizons for the independent check.
+- JPL Horizons reconstructed and predicted spacecraft trajectories (NASA/JPL navigation teams, ESA for Rosetta and JUICE).
 - NAIF SPICE kernels: Earth orientation (ITRF93) and lunar orientation (MOON_ME, DE440).
 - NASA Blue Marble: Next Generation and Black Marble 2016, MODIS land/water mask, via NASA GIBS.
 - NOAA ETOPO 2022 (60 arc-second); EGM96 geoid (NGA), via the PROJ data CDN.
