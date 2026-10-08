@@ -4,7 +4,32 @@ A real-time 3D simulator for travelling from Earth through the Solar System and 
 
 The full plan, including the roadmap, lives in the [design doc](https://claude.ai/code/artifact/c235450b-21cd-41a8-bc4b-b69ca4239c84).
 
-## Asteroids and comets (this code)
+## Live cosmic events (this code)
+
+**Watch a supernova go off, a star being born, and two black holes merge, each computed from physics and checked against what was measured.** Pick one from `Events…` → `Cosmic events`, or search `SN 1987A`, `Betelgeuse supernova`, `Barnard 68` or `GW150914`. A panel charts the event against the measurements, with a timeline to drag, play/pause and auto pace (slow when things happen fast).
+
+- **SN 1987A** (`src/core/supernova.ts`, `src/render/supernova.ts`), on its real date: 23 Feb 1987, 161,700 light years away in the Large Magellanic Cloud.
+  - The light curve is computed: nickel-56 → cobalt-56 → iron decay (then cobalt-57 and titanium-44) heating the ejecta, with gamma rays leaking out as they thin, diffusing out as in Arnett's model, and the stored heat released when hydrogen recombines. Fitted to the measured bolometric light (Suntzeff et al. 1991, Bouchet et al. 1991): 0.04 dex rms, with 0.069 Suns of nickel (the gamma-ray lines say 0.071 ± 0.003). It peaks at magnitude 3.1 from Earth in May (2.9 measured).
+  - Up close: the photosphere as a glowing ball expanding at thousands of km/s and cooling to 5,000 K, then the ejecta turning see-through (20,000 glowing clumps: hydrogen outside, oxygen and iron fingers inside, elongated in the ring's plane as JWST and ALMA see them).
+  - Its rings, from HST's geometry (0.808″, inclined 43°): the inner ring lights up after the flash with each part seen when its light reaches the camera (light echoes from wherever you are: from Earth, day 74 and 389; measured 75 ± 2.6 and 390 ± 1.8). Then the hot spots where the blast wave hits it, from 1995, brightest in 2009, fading since.
+- **Betelgeuse as a supernova** (computed): press it and it explodes now. A type II-P plateau from Popov's formulas for its 764 solar radii; magnitude −11 from Earth for three months, brighter than the half Moon. The catalogue's Betelgeuse goes out when its light arrives.
+- **A star is born in Barnard 68** (`src/core/starbirth.ts`, `src/render/starbirth.ts`). The cloud is real: a Bonnor–Ebert sphere of 2.2 Suns at 16 K, just past the point where it must collapse (Alves et al. 2001, mapped from 3,700 stars behind it). It is ray-marched: it dims and reddens the stars behind it (A_V 28 through its centre). The collapse is computed: inside out (Shu 1977), each shell falling in its free-fall time; a third of the gas makes the star (0.74 Suns); the disc forms at the gas's centrifugal radius; the outflow clears a cavity and its jets throw out Herbig–Haro knots. Once a star is lit, its light scatters off the dust (a reflection nebula up the cavity, with the disc's shadow). The young star follows the Baraffe et al. (2015) tracks from a class 0 protostar to a T Tauri star and onto the main sequence.
+- **GW150914** (`src/core/merger.ts`, `src/render/merger.ts`), the first gravitational waves detected, at LIGO's most probable sky position, 1.3 billion light years out.
+  - The orbit: the post-Newtonian equations (TaylorT4 to 3.5PN), handed over to the numerical-relativity merger LIGO published. Final hole from fits to numerical relativity: 63.0 Suns, spin 0.68, 3.2 Suns radiated (LIGO: 63.1, 0.69, 3.1). Ringing at 248 Hz.
+  - Matches what Hanford recorded (overlap 0.80) and the NR waveform (0.88), filtered alike. Listen to the chirp from the panel.
+  - The view: each pixel's light ray traced back through both holes (each bends light exactly as a Schwarzschild hole; their pulls added), then through the Kerr metric of the single spinning hole after the merger. A sheet in the orbital plane shows the wave's pattern spreading at the speed of light (height exaggerated). The HUD gives the strain where you are.
+- **Gate** (`tests/cosmic.test.ts`): the light curve against the measurements, nickel mass, peak brightness and the ring's echo delays; Betelgeuse's plateau and peak; the final mass, spin, energy, ring-down frequency, peak power (3.6e56 erg/s) and the overlaps with LIGO's data; Barnard 68's mass, size, extinction and critical point, the timing of the collapse, the star's mass and track, and mass conservation.
+- New URL parameters: `?cosmic=sn1987a&at=300` starts an event at a moment of its own (days for the supernovae, years for `b68`, seconds from the peak for `gw150914`). With `focus=Earth` the camera stays put (`?focus=Earth&dist=400000&cosmic=betelgeuse&at=10&sky=84,-1&fov=60`).
+
+### Limits
+
+- The light curve is a one-zone model: right in total light, not in spectra. The V-band share in the nebular phase (lines and dust) is an estimate from the colours measured then. The ring's brightness (about 10^35 erg/s after the flash, several times that in 2009) is estimated from the line fluxes; the hot spots after the first are spread round the ring, not at their measured places. The ejecta's clumps are statistically right, not a map.
+- Betelgeuse's explosion is a what-if: no one can say when, and its nickel mass and energy are typical values.
+- Barnard 68's future is computed, not observed: spherical collapse plus a spin from typical cores (1 km/s/pc), its axis chosen. Accretion bursts, magnetic fields and companions are left out; the disc is a thin sheet; the jets' knots are typical.
+- The merger's two holes bend light by adding their pulls, exact for each hole alone but approximate where both bend a ray strongly (a full binary metric needs numerical relativity). The orbit's position angle and the host galaxy are unknown: the stars around it are a computed neighbourhood like the Sun's. LIGO's source-frame masses and the distance (440 Mpc) are medians of wide ranges.
+- Time: the supernovae are shown as their light reaches the camera, dated as Earth saw them. Barnard 68 and the merger run on clocks of their own.
+
+## Asteroids and comets
 
 **Land and walk on the 12 small bodies spacecraft have visited, in their real shapes.** Bennu, Ryugu, Itokawa, Eros, comet 67P/Churyumov–Gerasimenko, Arrokoth, Didymos and its moon Dimorphos, Lutetia, Šteins, comet Tempel 1 and Donaldjohanson. Search a name or fly there, press `Walk here` near the ground (`?walk=1`), and ride along with the missions that went to them.
 
@@ -450,6 +475,9 @@ python3 pipeline/build_visited.py $DATA public/data --fixtures tests/fixtures/vi
 
 # Black holes: the S-stars and the EHT images
 python3 pipeline/fetch_blackholes.py $DATA public/data   # VizieR (Gillessen et al. 2017), ESO image archive
+
+# Cosmic events: SN 1987A's light curve, LIGO's GW150914 data and sky map, young-star tracks (needs healpy)
+python3 pipeline/fetch_cosmic.py public/data/cosmic
 ```
 
 Tiles are geographic: level L has 2^(L+1) × 2^L tiles of 180/2^L degrees. Colour tiles are 256 px JPEG; height tiles are 65 × 65 int16 grids in 0.5 m steps (the lowest bit marks water), zlib-compressed. Tiles are grouped into packs (one file per subtree) so a view needs a handful of requests.
@@ -499,3 +527,4 @@ Tiles are geographic: level L has 2^(L+1) × 2^L tiles of 180/2^L degrees. Colou
 - Mars 2020 Terrain Relative Navigation CTX and HiRISE elevation models and orthoimages of Jezero crater (USGS Astrogeology, NASA/JPL/University of Arizona).
 - JPL Horizons state vectors and the SBDB Close-Approach Data API for close approaches; NAIF Mars 2020 landing-site and clock kernels; Mars 2020 Mastcam-Z raw images (NASA/JPL-Caltech/ASU) for the Phobos transit check.
 - Dust properties: Wolff et al. (2009); gait: Minetti (2001), Kram et al. (1997).
+- Cosmic events: SN 1987A bolometric light curve (Suntzeff et al. 1991, AJ 102, 1118; Bouchet et al. 1991, A&A 245, 490) as transcribed by D. Jeffery (UNLV); ring geometry from Panagia (2003) and Tziamtzis et al. (2011); echo delays checked against Gould and Uza (1998); hot spots after Sonneborn et al. (1998), Sugerman et al. (2002), Fransson et al. (2015) and Larsson et al. (2019). GW150914 strain, numerical-relativity waveform, GWTC-1 parameters and sky map: LIGO Scientific Collaboration and Virgo Collaboration, Gravitational Wave Open Science Center (gwosc.org), Abbott et al. (2016, 2019). Barnard 68: Alves, Lada and Lada (2001). Pre-main-sequence tracks: Baraffe et al. (2015).

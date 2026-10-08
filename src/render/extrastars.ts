@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 
 /** Uniforms this layer sets itself instead of sharing with the star field. */
-const OWN = new Set(['uCamHigh', 'uCamLow', 'uHideWithin', 'uDustBlend', 'uYears']);
+const OWN = new Set(['uCamHigh', 'uCamLow', 'uHideWithin', 'uHideAt', 'uDustBlend', 'uYears']);
 
 /**
  * Stars placed by the app rather than the catalogue (the S-stars around Sgr A*, the
@@ -15,6 +15,7 @@ export class ExtraStars {
   private readonly position: THREE.BufferAttribute;
   private readonly absMag: THREE.BufferAttribute;
   private readonly base: Float32Array;
+  private readonly teff: THREE.BufferAttribute;
 
   constructor(source: THREE.ShaderMaterial, stars: Array<{ absMag: number; teffCode: number }>) {
     this.material = source.clone();
@@ -31,11 +32,24 @@ export class ExtraStars {
     g.setAttribute('position', this.position);
     g.setAttribute('velocity', new THREE.Float16BufferAttribute(new Uint16Array(n * 3), 3));
     g.setAttribute('absMag', this.absMag);
-    g.setAttribute('teffCode', new THREE.BufferAttribute(new Uint8Array(stars.map((s) => s.teffCode)), 1));
+    this.teff = new THREE.BufferAttribute(new Uint8Array(stars.map((s) => s.teffCode)), 1);
+    this.teff.setUsage(THREE.DynamicDrawUsage);
+    g.setAttribute('teffCode', this.teff);
     g.setAttribute('avCode', new THREE.BufferAttribute(new Uint8Array(n), 1));
     this.points = new THREE.Points(g, this.material);
     this.points.frustumCulled = false;
     this.points.renderOrder = -10;
+  }
+
+  /** Change a star's brightness and colour (one that changes: a supernova, a young star). */
+  setStar(k: number, absMag: number, teffCode: number): void {
+    this.base[k] = absMag;
+    const t = this.teff.array as Uint8Array;
+    const code = Math.max(0, Math.min(255, Math.round(teffCode)));
+    if (t[k] !== code) {
+      t[k] = code;
+      this.teff.needsUpdate = true;
+    }
   }
 
   /**
