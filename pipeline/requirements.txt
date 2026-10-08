@@ -13,3 +13,5 @@ scipy>=1.11  # dust grid interpolation
 healpy>=1.16  # Edenhofer dust map
 pyerfa>=2  # tests/fixtures/sky-reference.json
 torch>=2.2  # only for pipeline/build_nebula_detail.py (Real-ESRGAN); CPU build: --index-url https://download.pytorch.org/whl/cpu
+fast-simplification>=0.1  # pipeline/build_shapes.py (whole-mesh decimation)
+pyfqmr>=0.2  # pipeline/build_shapes.py (chunks, borders kept)

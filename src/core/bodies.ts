@@ -1,4 +1,5 @@
 import { pckRadii } from './iau';
+import shapes from '../generated/shapes.json';
 
 /**
  * Every body drawn as a globe: the Sun, planets, major moons, Pluto and Charon, and the
@@ -12,7 +13,7 @@ import { pckRadii } from './iau';
  * monochrome and for bodies with no global map.
  */
 
-export type Kind = 'star' | 'planet' | 'dwarf' | 'moon' | 'asteroid';
+export type Kind = 'star' | 'planet' | 'dwarf' | 'moon' | 'asteroid' | 'comet' | 'kbo';
 /** How sunlight reflects: rocky regolith, icy regolith, or a cloud deck (limb-darkened). */
 export type Shading = 'rocky' | 'icy' | 'cloud';
 
@@ -38,6 +39,10 @@ export interface Body {
   /** Ephemeris file with this body's positions (moons-<system>.bin), if not DE440. */
   file?: string;
   emissive?: boolean;
+  /** Drawn from its spacecraft shape model (public/data/shapes/<slug>, render/shapebody.ts). */
+  shape?: string;
+  /** Other names to search by. */
+  aliases?: string[];
 }
 
 type Spec = Omit<Body, 'radius' | 'radii' | 'pole'> & { radii?: [number, number, number]; pole?: [number, number] };
@@ -82,6 +87,38 @@ const SPECS: Spec[] = [
   { id: 901, name: 'Charon', kind: 'moon', color: '#b1a79e', albedo: 0.41, shading: 'icy', map: 'charon', orbit: { around: 999, periodDays: 6.38723 }, file: 'pluto' },
 ];
 
+/**
+ * Small bodies that spacecraft visited, drawn from their mission teams' shape models
+ * (pipeline/build_shapes.py): constants from src/generated/shapes.json, orbits from JPL
+ * Horizons (pipeline/build_visited.py, moons-visited.bin). Radii here are the model's
+ * extents along its axes. Periods only size the orbit lines: Arrokoth's 298-year orbit
+ * draws as an arc. Dimorphos circles Didymos every 11.92 h (11.37 h since DART).
+ */
+const VISITED: Record<string, { periodDays: number; around?: number; aliases?: string[] }> = {
+  bennu: { periodDays: 436.65, aliases: ['101955 Bennu'] },
+  ryugu: { periodDays: 474.0, aliases: ['162173 Ryugu'] },
+  itokawa: { periodDays: 556.4, aliases: ['25143 Itokawa'] },
+  eros: { periodDays: 643.2, aliases: ['433 Eros'] },
+  '67p': { periodDays: 2353, aliases: ['67P', 'Churyumov-Gerasimenko', 'Churyumov–Gerasimenko'] },
+  arrokoth: { periodDays: 108700, aliases: ['486958 Arrokoth', '2014 MU69', 'Ultima Thule'] },
+  didymos: { periodDays: 770.1, aliases: ['65803 Didymos'] },
+  dimorphos: { periodDays: 0.4935, around: 2065803 },
+  lutetia: { periodDays: 1388, aliases: ['21 Lutetia'] },
+  steins: { periodDays: 1327, aliases: ['Steins', '2867 Steins'] },
+  'tempel-1': { periodDays: 2028, aliases: ['9P/Tempel 1', '9P', 'Tempel'] },
+  donaldjohanson: { periodDays: 1344, aliases: ['52246 Donaldjohanson'] },
+};
+interface ShapeEntry { id: number; name: string; kind: string; extents: number[]; albedo: number; color: string }
+for (const [slug, v] of Object.entries(VISITED)) {
+  const e = (shapes.bodies as Record<string, ShapeEntry>)[slug];
+  if (!e) continue;
+  SPECS.push({
+    id: e.id, name: e.name, kind: e.kind as Kind, color: e.color, albedo: e.albedo, shading: 'rocky', shape: slug,
+    orbit: { around: v.around ?? 10, periodDays: v.periodDays }, file: 'visited', aliases: v.aliases,
+    radii: [e.extents[0], e.extents[1], e.extents[2]],
+  });
+}
+
 export const BODIES: Body[] = SPECS.map((s) => {
   const radii = s.radii ?? pckRadii(s.id);
   if (!radii) throw new Error(`No radii for ${s.name}`);
@@ -89,7 +126,7 @@ export const BODIES: Body[] = SPECS.map((s) => {
 });
 
 /** NAIF ids of planet systems whose moons files load on demand: system name -> planet id. */
-export const SYSTEMS: Record<string, number> = { mars: 499, jupiter: 599, saturn: 699, uranus: 799, neptune: 899, pluto: 999, asteroids: 10 };
+export const SYSTEMS: Record<string, number> = { mars: 499, jupiter: 599, saturn: 699, uranus: 799, neptune: 899, pluto: 999, asteroids: 10, visited: 10 };
 
 /**
  * Ring systems, km from the planet's centre, in its equator plane. Saturn's radial

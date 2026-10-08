@@ -277,11 +277,53 @@ export function buildModel(kind: CraftModel, uniforms: Uniforms): THREE.Group {
       }
       break;
     }
+    case 'near':
+      // An octagonal bus 1.7 m across, the 1.5 m dish on top and four fixed solar panels
+      // around it like a windmill.
+      k.prism(8, 0.92, 1.7, [0, 0, -1.0], GOLD, 0.4);
+      k.dish(0.75, 0.22, -0.1);
+      for (const a of [0, Math.PI / 2, Math.PI, (3 * Math.PI) / 2]) {
+        const c = Math.cos(a), s = Math.sin(a);
+        k.panel(1.83, 1.22, [1.85 * c, 1.85 * s, -0.25], a);
+      }
+      k.prism(16, 0.2, 0.5, [0, 0, -2.1], FOIL_BLACK);
+      break;
+    case 'deepimpact': {
+      // The flyby spacecraft: a 3.3 m long box, one 2.8 m solar array, the 30 cm
+      // telescope; the 370 kg copper-faced impactor under it until release.
+      k.box(1.6, 1.7, 2.4, [0, 0, -1.2], GOLD, 0.4);
+      k.panel(2.8, 2.7, [-2.4, 0, -1.0]);
+      k.rod([-0.8, 0, -1.0], [-1.0, 0, -1.0], 0.05);
+      k.prism(24, 0.25, 1.4, [0.5, 0.5, 0.4], WHITE, 0.2);
+      k.dish(0.5, 0.15, 0.0);
+      const impactor = k.prism(6, 0.55, 1.0, [0, 0, -2.95], '#b87333', 0.5);
+      impactor.name = 'impactor';
+      break;
+    }
+    case 'hayabusa2':
+      // A 1.0 x 1.6 x 1.25 m box, two solar wings 6 m tip to tip, the flat high-gain
+      // antennas on top and the sampler horn below, 1 m long.
+      k.box(1.6, 1.0, 1.25, [0, 0, -0.65], GOLD, 0.4);
+      for (const s of [-1, 1]) k.panel(2.1, 1.0, [s * 1.95, 0, -0.6]);
+      k.box(0.8, 0.8, 0.05, [0, 0, 0.0], SILVER, 0.5);
+      k.prism(16, 0.06, 1.0, [0.2, 0.1, -1.8], SILVER, 0.3);
+      k.prism(32, 0.25, 0.2, [-0.45, 0, -1.4], WHITE, 0.2);
+      break;
+    case 'dart':
+      // A 1.2 x 1.3 x 1.3 m box, the camera DRACO at the front and two 8.5 m rolled-out
+      // solar arrays.
+      k.box(1.2, 1.3, 1.3, [0, 0, -0.65], GOLD, 0.4);
+      k.prism(16, 0.1, 0.5, [0, 0, 0.25], FOIL_BLACK);
+      for (const s of [-1, 1]) {
+        k.rod([s * 0.6, 0, -0.65], [s * 0.9, 0, -0.65], 0.04);
+        k.panel(8.5, 2.3, [s * 5.15, 0, -0.65]);
+      }
+      break;
   }
   return k.root;
 }
 
-/** The parts that come off during the mission: Cassini's Huygens probe. */
+/** The parts that come off during the mission: Cassini's Huygens probe, Deep Impact's impactor. */
 export function detach(model: THREE.Group, name: string, attached: boolean): void {
   const part = model.getObjectByName(name);
   if (part) part.visible = attached;

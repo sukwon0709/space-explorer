@@ -1,6 +1,7 @@
 import { BODIES, findBody } from './bodies';
 import type { Ephemeris, Vec3 } from './ephemeris';
 import { icrfToScene } from './frames';
+import shapes from '../generated/shapes.json';
 
 /**
  * Gravitational parameters GM (km^3/s^2), keyed by NAIF id. The Sun, planets and Moon
@@ -49,6 +50,10 @@ export const GM: Record<number, number> = {
   2000004: 17.288245,
   2000010: 5.78,
 };
+
+// The small bodies spacecraft visited: GM from their missions' radio tracking where
+// measured, else the shape model's volume at an assumed density (pipeline/build_shapes.py).
+for (const e of Object.values(shapes.bodies as Record<string, { id: number; gm: number }>)) GM[e.id] = e.gm;
 
 export const SUN_GM = GM[10];
 /** Standard gravity, km/s^2. */

@@ -4,3 +4,4 @@ screenshots/
 *.bsp
 __pycache__/
 scratch/
+/data/

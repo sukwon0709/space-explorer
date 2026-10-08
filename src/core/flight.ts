@@ -36,6 +36,8 @@ export interface Source {
   gm: number;
   /** Event horizon radius, km: the hole pulls with the Paczyński–Wiita potential GM/(r - 2GM/c^2). */
   horizon?: number;
+  /** Gravity of an irregular body (km/s^2, scene axes) at `rel` from its centre, in place of GM/r^2. */
+  accel?: (rel: Vec3, out: Vec3) => Vec3;
 }
 
 /**
@@ -242,6 +244,16 @@ export class Ship {
       const r = length(d);
       if (s.horizon !== undefined && r < Math.max(s.horizon, (2 * s.gm) / (C_KMS * C_KMS)) * 1.001) {
         events.push({ kind: 'horizon', id: s.id });
+        continue;
+      }
+      if (s.accel) {
+        const a = s.accel([-d[0], -d[1], -d[2]], [0, 0, 0]);
+        const g = length(a);
+        if (g > best) {
+          best = g;
+          this.strongest = s.id;
+        }
+        for (let k = 0; k < 3; k++) out[k] += a[k];
         continue;
       }
       // Paczyński–Wiita near a black hole: Newtonian far out, unbounded at r = 2GM/c^2.

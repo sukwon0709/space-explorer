@@ -155,6 +155,24 @@ const views = {
   '55-cnc-e': `focus=55%20Cnc%20e&t=${T}`,
   'kelt-9-b': `focus=KELT-9%20b&t=${T}`,
   'eps-eri-b': `focus=eps%20Eri%20b&t=${T}`,
+  // Asteroids and comets from their spacecraft shape models: whole, from low over the
+  // ground, and on foot (time sped up so walking looks natural).
+  'bennu': `focus=Bennu&t=2020-10-20T21:40:00Z`,
+  'bennu-nightingale': `focus=Bennu&t=2020-10-20T21:40:00Z&lat=56&lon=42&dist=0.06&heading=200&tilt=20`,
+  'bennu-walk': `focus=Bennu&t=2020-10-20T21:40:00Z&lat=56&lon=42&dist=0.05&heading=200&walk=1&look=-5`,
+  'ryugu': `focus=Ryugu&t=2019-02-21T23:00:00Z`,
+  'itokawa': `focus=Itokawa&t=2005-11-19T21:00:00Z`,
+  'eros': `focus=Eros&t=2001-02-12T19:00:00Z`,
+  '67p': `focus=67P/Churyumov-Gerasimenko&t=2015-03-01T00:00:00Z`,
+  '67p-ground': `focus=67P/Churyumov-Gerasimenko&t=2015-03-01T00:00:00Z&dist=0.15&heading=0&tilt=15`,
+  'arrokoth': `focus=Arrokoth&t=2019-01-01T05:33:00Z`,
+  'didymos-dimorphos': `focus=Didymos&t=2022-09-26T23:10:00Z&dist=1.6`,
+  'dimorphos-walk': `focus=Dimorphos&t=2022-09-26T23:10:00Z&lat=0&lon=50&dist=0.03&heading=270&walk=1&look=25`,
+  // Riding along at the small bodies.
+  'hayabusa2-touchdown': `mission=hayabusa2&t=2019-02-21T22:25:00Z&rate=0`,
+  'dart-impact': `mission=dart&t=2022-09-26T23:14:19Z&rate=0`,
+  'osirisrex-bennu': `mission=osiris-rex&t=2019-06-20T00:00:00Z&rate=0`,
+  'near-eros': `mission=near-shoemaker&t=2001-02-12T19:00:00Z&rate=0`,
   // Sky events (the Events menu), mid-event.
   'transit-venus-2012': `event=transit%20venus%202012&t=2012-06-06T01:29:36Z`,
   'transit-mercury-2019': `event=transit%20mercury%202019&t=2019-11-11T15:19:48Z`,

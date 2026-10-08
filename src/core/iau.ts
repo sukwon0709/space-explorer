@@ -1,6 +1,7 @@
 import type { Mat3 } from './orientation';
 import { OBLIQUITY_J2000 } from './frames';
 import rotation from '../generated/rotation.json';
+import shapes from '../generated/shapes.json';
 
 /**
  * IAU WGCCRE 2015 rotation models (pole right ascension and declination, prime
@@ -22,6 +23,11 @@ const DEG = Math.PI / 180;
 const DAY = 86400;
 const CENTURY = 36525 * DAY;
 const table = rotation as unknown as { bodies: Record<string, RotationEntry>; systems: Record<string, { degree: number; angles: number[] }> };
+// The small bodies spacecraft visited: their mission teams' rotation models, which go
+// with their shape models' axes (pipeline/build_shapes.py).
+for (const e of Object.values(shapes.bodies as Record<string, { id: number; rotation: RotationEntry | null }>)) {
+  if (e.rotation) table.bodies[String(e.id)] = { ...e.rotation };
+}
 
 /** Triaxial radii (km) from the PCK, or undefined. */
 export function pckRadii(id: number): [number, number, number] | undefined {

@@ -9,7 +9,7 @@ import type { Vec3 } from './core/ephemeris';
 import { bodyToGeodetic, enu, geodeticToBody, MARS_SPHERE, MOON_SPHERE, WGS84, type Shape } from './core/geodesy';
 import { TileStore, type Manifest } from './core/tilestore';
 import { asteroidOrbit, cometOrbit, orbitPosition, parseAsteroids, type AsteroidSet, type Comet, type Orbit } from './core/smallbodies';
-import { AU, SUN_RADIUS, SolarSystem } from './render/world';
+import { AU, SUN_RADIUS, SolarSystem, lockedFrame } from './render/world';
 import { CameraRig, SCENE_BASIS, type Anchor, type Frame } from './render/camera';
 import { Globe, type GlobeFrame, type SurfaceKind } from './render/globe';
 import { EarthSky } from './render/sky';
@@ -48,6 +48,9 @@ import { TOURS, TourPlayer, type TourStep } from './ui/tours';
 import { FlightControls, FlightHud } from './ui/flight';
 import { WalkControls } from './ui/walk';
 import { Walker, type WalkWorld } from './core/walker';
+import { ShapeWalker, tangent, type ShapeWalkWorld } from './core/shapewalk';
+import { ShapeBody, type ShapeFrame } from './render/shapebody';
+import type { Mat3 } from './core/orientation';
 import { Lander } from './render/lander';
 import { BOOST, Ship, apsides, type FlightWorld, type Source, type WarpLimiter } from './core/flight';
 import { C_KMS, G0, GM, SolarGravity } from './core/gravity';
@@ -206,10 +209,14 @@ async function main() {
     fetch(`${BASE}data/stars/systems.json`).then((r) => r.json() as Promise<SystemsData>).catch(() => ({ planets: {}, hosts: {}, binaries: [], featured: [] }) as SystemsData),
   ]);
   if (smallBuffer) ephemeris.add(smallBuffer);
+  // Didymos's orbit is its system's barycentre: the primary sits off it by Dimorphos's
+  // share of the mass, opposite Dimorphos (moons-visited.bin).
+  ephemeris.setBarycentre(2065803, 120065803, GM[120065803] / (GM[2065803] + GM[120065803]));
   const asteroids: AsteroidSet | undefined = asteroidsBuffer ? parseAsteroids(asteroidsBuffer) : undefined;
   // Defunct comets (D/, such as the fragments of Shoemaker-Levy 9) and sungrazers that
   // did not survive perihelion would be drawn on orbits nothing follows any more.
-  const comets = cometData.comets.filter((c) => !c.name.startsWith('D/') && c.q > 0.02);
+  // (Comets drawn from their shape models are bodies of their own.)
+  const comets = cometData.comets.filter((c) => !c.name.startsWith('D/') && c.q > 0.02 && !BODIES.some((b) => b.name === c.name || b.aliases?.includes(c.name)));
 
   // URL parameters make any view reproducible:
   //   ?focus=Earth&lat=36.06&lon=-112.14&dist=3&heading=20&tilt=12&t=2026-10-05T16:00Z
@@ -270,6 +277,15 @@ async function main() {
   if (sunMap) prepareMap(sunMap, renderer);
   const system = new SolarSystem(ephemeris, orientation, { sunMap, sunScale: sunMeta.scale, saturnRings });
   scene.add(system.group);
+  // Small bodies spacecraft visited, drawn from their shape models once near
+  // (render/shapebody.ts); far off, their plain globes stand in.
+  const shapes = new Map<number, ShapeBody>();
+  for (const body of BODIES) {
+    if (!body.shape) continue;
+    const view = new ShapeBody(body.shape, `${BASE}data/shapes/`, albedoScale(body, undefined));
+    scene.add(view.group);
+    shapes.set(body.id, view);
+  }
 
   // ---- global maps and moons, loaded as they are needed -------------------------
   let loading = 0;
@@ -294,10 +310,20 @@ async function main() {
       .then((buffer) => ephemeris.add(buffer))
       .catch((err) => console.warn(`moons ${name}:`, err));
   };
+  const shapeRequested = new Set<number>();
+  const requestShape = (id: number) => {
+    const view = shapes.get(id);
+    if (!view || shapeRequested.has(id)) return;
+    shapeRequested.add(id);
+    track(view.load()).catch((err) => console.warn(`shape ${id}:`, err));
+  };
   /** Load what a body needs to be drawn properly: its system's moons and the maps there. */
   const prepare = (id: number) => {
     const body = findBody(id);
     if (!body) return;
+    requestShape(id);
+    // A binary asteroid: both shapes.
+    for (const b of BODIES) if (b.shape && (b.orbit?.around === id || b.id === body.orbit?.around)) requestShape(b.id);
     const planet = body.orbit && body.orbit.around !== 10 ? body.orbit.around : body.id;
     for (const [name, planetId] of Object.entries(SYSTEMS)) if (planetId === planet) requestSystem(name);
     if (body.file) requestSystem(body.file);
@@ -311,6 +337,8 @@ async function main() {
   const rotationAt = (id: number, tdb: number, out: Float64Array) => {
     if (orientation.has(id)) return orientation.bodyToScene(id, tdb, out);
     if (hasRotation(id)) return iauBodyToScene(id, tdb, out);
+    const body = findBody(id);
+    if (body?.shape && body.orbit && body.orbit.around !== 10 && ephemeris.available(id, tdb + 60)) return lockedFrame(ephemeris, id, body.orbit.around, tdb, out);
     return undefined;
   };
   // The other worlds (pipeline/build_worlds.py): a reference sphere, and their tiles'
@@ -370,16 +398,43 @@ async function main() {
     const r = bodyById(id).radii;
     return (r[0] + r[1] + r[2]) / 3;
   };
+  /** Body-fixed to scene rotation of any globe, terrain or shape model. */
+  const axesOf = (id: number): Mat3 => surfaces.get(id)?.bodyToScene ?? system.orientationOf(id);
+  const toBodyAxes = (b: Mat3, v: Vec3, out: Vec3 = [0, 0, 0]): Vec3 => {
+    out[0] = b[0] * v[0] + b[3] * v[1] + b[6] * v[2];
+    out[1] = b[1] * v[0] + b[4] * v[1] + b[7] * v[2];
+    out[2] = b[2] * v[0] + b[5] * v[1] + b[8] * v[2];
+    return out;
+  };
+  const toSceneAxes = (b: Mat3, v: Vec3, out: Vec3 = [0, 0, 0]): Vec3 => {
+    const x = v[0], y = v[1], z = v[2];
+    for (let k = 0; k < 3; k++) out[k] = b[k * 3] * x + b[k * 3 + 1] * y + b[k * 3 + 2] * z;
+    return out;
+  };
+  /**
+   * A shape model's surface seen from outside along a direction from its centre (unit,
+   * body frame): distance from the centre (km), or the mean radius before it has loaded.
+   */
+  const shapeRadius = (id: number, dir: Vec3, rocks = false): number => {
+    const view = shapes.get(id)!;
+    if (!view.ready) return meanRadius(id);
+    const R = view.index!.radius * 1.05;
+    const hit = view.raycast([dir[0] * R, dir[1] * R, dir[2] * R], [-dir[0], -dir[1], -dir[2]], R, rocks);
+    return hit ? R - hit.t : view.index!.minRadius;
+  };
+  const radialDir = (lon: number, lat: number): Vec3 => [Math.cos(lat) * Math.cos(lon), Math.cos(lat) * Math.sin(lon), Math.sin(lat)];
 
   // ---- asteroids and comets -----------------------------------------------------
   const smallBodies = asteroids ? new SmallBodies(asteroids, comets, renderer.getPixelRatio()) : undefined;
   if (smallBodies) scene.add(smallBodies.group);
   const smallOrbits = new Map<number, Orbit>();
   const targets = new Map<number, Target>();
-  for (const body of BODIES) targets.set(body.id, { id: body.id, name: body.name, kind: body.kind, radius: body.radius[0] });
+  const KIND_NAME: Partial<Record<Body['kind'], string>> = { comet: 'comet nucleus', kbo: 'Kuiper belt object' };
+  for (const body of BODIES) targets.set(body.id, { id: body.id, name: body.name, kind: KIND_NAME[body.kind] ?? body.kind, radius: body.radius[0] });
   if (asteroids) {
     for (const a of asteroidNames) {
-      if (BODIES.some((b) => b.name === a.name)) continue;
+      const number = Number(a.designation.split(' ')[0]);
+      if (BODIES.some((b) => b.name === a.name || (Number.isInteger(number) && b.id === 2000000 + number))) continue;
       const id = ASTEROID_ID + a.index;
       smallOrbits.set(id, asteroidOrbit(asteroids, a.index));
       targets.set(id, { id, name: a.name, kind: a.designation, radius: 1 });
@@ -457,8 +512,25 @@ async function main() {
     const s = surfaces.get(id);
     if (isDeep(id)) return deep.frame(id, centre) ?? { origin: centre, ...SCENE_BASIS };
     if (isHole(id)) return bhs.frame(id, centre);
+    if (anchor && shapes.has(id)) {
+      // A shape model: the look point is where the line from the centre meets the surface.
+      const dir = radialDir(anchor.lon, anchor.lat);
+      const h = settle(id, shapeRadius(id, dir));
+      const b = axesOf(id);
+      const local = enu(anchor.lon, anchor.lat);
+      const origin = toSceneAxes(b, [dir[0] * h, dir[1] * h, dir[2] * h]);
+      for (let k = 0; k < 3; k++) origin[k] += centre[k];
+      return { origin, east: toSceneAxes(b, local.east), north: toSceneAxes(b, local.north), up: toSceneAxes(b, local.up) };
+    }
     if (!s || !anchor) return { origin: centre, ...SCENE_BASIS };
-    const target = s.globe.heightAt(anchor.lon, anchor.lat);
+    const h = settle(id, s.globe.heightAt(anchor.lon, anchor.lat));
+    const local = enu(anchor.lon, anchor.lat);
+    const origin = sceneVector(s, geodeticToBody(s.shape, anchor.lon, anchor.lat, h));
+    for (let k = 0; k < 3; k++) origin[k] += centre[k];
+    return { origin, east: sceneVector(s, local.east), north: sceneVector(s, local.north), up: sceneVector(s, local.up) };
+  };
+  /** Ease the look point's height toward the ground's as finer ground loads. */
+  const settle = (id: number, target: number) => {
     const prev = anchorHeights.get(id) ?? target;
     // Settle over about a sixth of a second whatever the frame rate.
     const now = performance.now() / 1000;
@@ -466,10 +538,7 @@ async function main() {
     anchorTimes.set(id, now);
     const h = prev + (target - prev) * Math.max(k, 0.15);
     anchorHeights.set(id, h);
-    const local = enu(anchor.lon, anchor.lat);
-    const origin = sceneVector(s, geodeticToBody(s.shape, anchor.lon, anchor.lat, h));
-    for (let k = 0; k < 3; k++) origin[k] += centre[k];
-    return { origin, east: sceneVector(s, local.east), north: sceneVector(s, local.north), up: sceneVector(s, local.up) };
+    return h;
   };
 
   // The focus body's moons (and so its exact position) load first.
@@ -484,9 +553,8 @@ async function main() {
 
   /** A look point on the sunlit side: the subsolar point, moved 35 degrees west. */
   const sunlitAnchor = (id: number): Anchor => {
-    const s = surfaces.get(id)!;
     const toSun = sub(system.position(10), system.position(id));
-    const d = bodyVector(s, toSun);
+    const d = toBodyAxes(axesOf(id), toSun);
     return { lon: Math.atan2(d[1], d[0]) - 35 * DEG, lat: Math.max(-1.2, Math.min(1.2, Math.asin(d[2] / length(d)))) };
   };
   /** Azimuth (from north toward east) and altitude of the Sun at a ground point, radians. */
@@ -508,7 +576,7 @@ async function main() {
   };
   const viewFor = (id: number) => {
     const target = targets.get(id)!;
-    if (surfaces.has(id)) return { distance: target.radius * 3, yaw: 0, pitch: 1.25, anchor: sunlitAnchor(id) };
+    if (surfaces.has(id) || shapes.has(id)) return { distance: target.radius * 3, yaw: 0, pitch: 1.25, anchor: sunlitAnchor(id) };
     if (isDeep(id)) return { ...deep.view(id, target.radius), anchor: undefined };
     if (isHole(id)) return { ...bhs.viewFor(id), anchor: undefined };
     const [yaw, pitch] = sunlitView(id);
@@ -527,7 +595,7 @@ async function main() {
     if (!params.has('heading')) params.set('heading', String(startSite.heading));
     if (!params.has('tilt')) params.set('tilt', String(startSite.tilt));
   }
-  if (surfaces.has(focusTarget.id) && params.has('lat') && params.has('lon')) {
+  if ((surfaces.has(focusTarget.id) || shapes.has(focusTarget.id)) && params.has('lat') && params.has('lon')) {
     anchor = { lat: Number(params.get('lat')) * DEG, lon: Number(params.get('lon')) * DEG };
   }
   const rig = new CameraRig(focusTarget.id, Number(params.get('dist') ?? initial.distance), anchor);
@@ -640,6 +708,7 @@ async function main() {
   const options = document.getElementById('search-options') as HTMLDataListElement;
   const byName = new Map<string, number>();
   for (const t of targets.values()) byName.set(t.name.toLowerCase(), t.id);
+  for (const b of BODIES) for (const alias of b.aliases ?? []) if (!byName.has(alias.toLowerCase())) byName.set(alias.toLowerCase(), b.id);
   namedStars.forEach((star, k) => {
     for (const alias of [star.desig, star.host, ...(star.aka ?? [])]) if (alias && !byName.has(alias.toLowerCase())) byName.set(alias.toLowerCase(), STAR_ID + k);
   });
@@ -658,6 +727,7 @@ async function main() {
       const star = starOf(t.id);
       o.label = [star.desig, star.host, star.planets ? `${star.planets.length} planet${star.planets.length > 1 ? 's' : ''}` : ''].filter(Boolean).join(' · ') || 'star';
     } else if (isCraft(t.id)) o.label = 'spacecraft · ride along';
+    else if (shapes.has(t.id)) o.label = `${t.kind} · spacecraft shape model · land and walk`;
     else if (t.id >= ASTEROID_ID) o.label = t.id >= COMET_ID ? 'comet' : t.kind;
     return o;
   }));
@@ -1034,7 +1104,7 @@ async function main() {
       return findBody(id) ? solar.acceleration(id, tdb, out) : zero(out);
     },
     sources(abs, tdb) {
-      const list: Source[] = solar.sources(abs, tdb).map((id) => ({ id, gm: GM[id] }));
+      const list: Source[] = solar.sources(abs, tdb).map((id) => ({ id, gm: GM[id], accel: shapeGravity(id) }));
       const years = yearsSinceEpoch(tdb);
       const icrf = sceneToIcrf(abs, [0, 0, 0]);
       namedStars.forEach((star, k) => {
@@ -1052,6 +1122,11 @@ async function main() {
       return list;
     },
     altitude(id, rel) {
+      if (shapes.get(id)?.ready) {
+        const p = toBodyAxes(axesOf(id), rel, [0, 0, 0]);
+        const r = length(p);
+        return r - shapeRadius(id, [p[0] / r, p[1] / r, p[2] / r]);
+      }
       const s = surfaces.get(id);
       if (s) {
         const [lon, lat, h] = bodyToGeodetic(s.shape, bodyVector(s, rel, scratch));
@@ -1074,6 +1149,28 @@ async function main() {
       if (isHole(id)) return holeHorizon(id);
       return targets.get(id)?.radius ?? 1;
     },
+  };
+
+  /**
+   * An irregular body's own gravity close in (the polyhedron's, from its shape model and
+   * mass); further out, a point mass does as well.
+   */
+  const shapeGravity = (id: number): Source['accel'] => {
+    const view = shapes.get(id);
+    const poly = view?.gravity;
+    if (!view || !poly) return undefined;
+    const reach = 4 * view.index!.radius;
+    const local: Vec3 = [0, 0, 0], a: Vec3 = [0, 0, 0];
+    return (rel, out) => {
+      const r = length(rel);
+      if (r > reach) {
+        for (let k = 0; k < 3; k++) out[k] = (-GM[id] * rel[k]) / (r * r * r);
+        return out;
+      }
+      const b = axesOf(id);
+      poly.acceleration(toBodyAxes(b, rel, local), a);
+      return toSceneAxes(b, a, out);
+    };
   };
 
   /** Galaxies and other deep-sky objects don't move: their positions once. */
@@ -1480,9 +1577,41 @@ async function main() {
   const walkControls = new WalkControls({
     board: () => board(),
     exit: () => setWalking(undefined),
+    time: () => {
+      if (!shapeWalker) return;
+      realTime = !realTime;
+      clock.rate = realTime ? 1 : shapeRate;
+      clock.paused = false;
+      syncRate();
+      hud.say(realTime ? 'Real time: every step as slow as this gravity makes it' : `Time ${Math.round(shapeRate)}× faster again, so a walk looks like one on Earth`);
+    },
   });
   let walker: Walker | undefined;
+  /** On foot on a small body drawn from its shape model (core/shapewalk.ts). */
+  let shapeWalker: ShapeWalker | undefined;
+  /** How much faster time runs on foot there (Froude similarity), unless switched to real time. */
+  let shapeRate = 1;
+  let realTime = false;
+  /** Leaving a small body at more than its escape speed. */
+  let escaped = false;
   let walkBody = -1;
+  const onFoot = () => walker !== undefined || shapeWalker !== undefined;
+  const shapeWorld = (id: number): ShapeWalkWorld => {
+    const view = shapes.get(id)!;
+    const w = flightWorld.spin(id, clock.tdb) ?? [0, 0, 0];
+    return {
+      gravity: (p, out = [0, 0, 0]) => view.gravity!.acceleration(p, out),
+      spin: toBodyAxes(axesOf(id), w),
+      raycast: (o, d, t) => view.raycast(o, d, t, true),
+      gm: GM[id],
+      radius: view.index!.radius,
+    };
+  };
+  /** Local up (against gravity) and north at a point on a small body, body frame. */
+  const shapeUp = (id: number, p: Vec3) => {
+    const up = new ShapeWalker(p, [1, 0, 0], [0, 0, 1]).up(shapeWorld(id));
+    return { up, north: tangent([0, 0, 1], up) };
+  };
   /** The ship, parked where its pilot stepped out (body-fixed km, heading). */
   let parked: { body: number; p: Vec3; heading: number } | undefined;
   const shipModel = new Lander(true);
@@ -1513,7 +1642,12 @@ async function main() {
   walkButton.title = 'Stand on the ground here and walk, at this body\'s gravity';
   walkButton.hidden = true;
   walkButton.addEventListener('click', () => {
-    if (walker) return setWalking(undefined);
+    if (onFoot()) return setWalking(undefined);
+    if (shapes.has(rig.focus)) {
+      const local = toBodyAxes(axesOf(rig.focus), sub(lastView.eye, system.position(rig.focus), [0, 0, 0]));
+      const [lon, lat] = rig.anchor ? [rig.anchor.lon, rig.anchor.lat] : [Math.atan2(local[1], local[0]), Math.asin(local[2] / length(local))];
+      return setWalking(rig.focus, lon, lat, rig.anchor ? rig.yaw : 0);
+    }
     const s = surfaces.get(rig.focus);
     if (!s) return;
     const local = bodyVector(s, sub(lastView.eye, system.position(rig.focus), [0, 0, 0]));
@@ -1525,7 +1659,38 @@ async function main() {
   /** Start walking at a ground point (radians), or stop (body undefined). */
   const setWalking = (body: number | undefined, lon = 0, lat = 0, heading = 0) => {
     (document.activeElement as HTMLElement | null)?.blur?.();
-    if (body !== undefined) {
+    if (body !== undefined && shapes.has(body)) {
+      const view = shapes.get(body)!;
+      if (!view.ready || !view.gravity) return;
+      setFlight(false);
+      tours.stop();
+      const dir = radialDir(lon, lat);
+      const r = shapeRadius(body, dir);
+      const p: Vec3 = [dir[0] * r, dir[1] * r, dir[2] * r];
+      view.requestAround(p, 0.05);
+      const world = shapeWorld(body);
+      const { north, east, up } = enu(lon, lat);
+      const facing: Vec3 = [0, 1, 2].map((k) => north[k] * Math.cos(heading) + east[k] * Math.sin(heading)) as Vec3;
+      shapeWalker = new ShapeWalker(p, facing, up);
+      walker = undefined;
+      walkBody = body;
+      escaped = false;
+      // Time runs faster, so the gait (set by the Froude number) looks like one on Earth.
+      shapeRate = Math.round(ShapeWalker.timeRate(world, p));
+      realTime = false;
+      clock.rate = shapeRate;
+      clock.paused = false;
+      syncRate();
+      rig.focus = body;
+      lookUp = 0;
+      skyAim = undefined;
+      followSun = false;
+      fov = 60;
+      prepare(body);
+      hud.setHelp(SHAPE_WALK_HELP);
+      const g = length(shapeWalker.effective(world)) * 1000;
+      hud.say(`On foot on ${nameOf(body)}: gravity ${formatAccel(g / 1000)}, escape speed ${formatSlow(shapeWalker.escapeSpeed(world) * 1000)}. Time runs ${shapeRate}× faster so walking looks natural (T for real time).`, 10);
+    } else if (body !== undefined) {
       const s = surfaces.get(body);
       if (!s) return;
       setFlight(false);
@@ -1544,6 +1709,22 @@ async function main() {
       prepare(body);
       hud.setHelp(WALK_HELP);
       hud.say(`On foot on ${nameOf(body)}. W to walk, Shift to run, Space to jump, drag to look around.`, 7);
+    } else if (shapeWalker) {
+      const w = shapeWalker;
+      shapeWalker = undefined;
+      clock.rate = 1;
+      syncRate();
+      fov = 50;
+      hud.setHelp(hud.shipHelp);
+      if (escaped) {
+        // Drifting away for good: the camera stays where the walker is.
+        const frame = frameOf(walkBody);
+        rig.place(walkBody, frame, sub(lastView.eye, frame.origin));
+      } else {
+        const [lon, lat] = [Math.atan2(w.p[1], w.p[0]), Math.asin(w.p[2] / length(w.p))];
+        const { north, east } = enu(lon, lat);
+        rig.flyTo(walkBody, 0.03, performance.now() / 1000, Math.atan2(dot(w.fwd, east), dot(w.fwd, north)), 12 * DEG, { lon, lat }, 1);
+      }
     } else if (walker) {
       const s = surfaces.get(walkBody)!;
       const [lon, lat] = walker.geodetic(s.shape);
@@ -1553,7 +1734,7 @@ async function main() {
       fov = 50;
       hud.setHelp(hud.shipHelp);
     }
-    const active = walker !== undefined;
+    const active = onFoot();
     walkControls.show(active);
     hud.show(active || ship !== undefined);
     walkButton.textContent = active ? 'Stop walking' : 'Walk here';
@@ -1565,6 +1746,21 @@ async function main() {
   const stepOut = () => {
     if (!ship) return;
     const body = ship.landed;
+    if (body !== undefined && ship.ref === body && shapes.get(body)?.ready) {
+      // Down the ladder onto a small body: 7 m in front of the ship, facing away from it.
+      const b = axesOf(body);
+      const p = toBodyAxes(b, ship.rel);
+      const { up, north } = shapeUp(body, p);
+      const fwd = tangent(toBodyAxes(b, ship.forward()), up);
+      const east = cross(north, up);
+      parked = { body, p: [...p], heading: Math.atan2(dot(fwd, east), dot(fwd, north)) };
+      const q: Vec3 = [p[0] + fwd[0] * 0.007, p[1] + fwd[1] * 0.007, p[2] + fwd[2] * 0.007];
+      const r = length(q);
+      const lon = Math.atan2(q[1], q[0]), lat = Math.asin(q[2] / r);
+      const local = enu(lon, lat);
+      setWalking(body, lon, lat, Math.atan2(dot(fwd, local.east), dot(fwd, local.north)));
+      return;
+    }
     const s = body !== undefined ? surfaces.get(body) : undefined;
     if (body === undefined || !s || ship.ref !== body) {
       hud.say('Land first: set down on a world with a solid surface, then O steps outside');
@@ -1583,6 +1779,27 @@ async function main() {
 
   /** Back into the parked ship, standing on the ground. */
   const board = () => {
+    if (shapeWalker && parked && parked.body === walkBody) {
+      const d = length(sub(shapeWalker.p, parked.p, [0, 0, 0])) * 1000;
+      if (d > 20) return hud.say(`Your ship is ${d < 1000 ? d.toFixed(0) + ' m' : formatDistance(d / 1000)} away: walk to it to board`);
+      const body = walkBody;
+      const b = axesOf(body);
+      const world = shapeWorld(body);
+      const dir = toSceneAxes(b, shapeWalker.view(world).dir);
+      const up = toSceneAxes(b, shapeUp(body, parked.p).up);
+      const p = parked.p;
+      parked = undefined;
+      setWalking(undefined);
+      lastView.eye = add(system.position(body), toSceneAxes(b, p));
+      lastView.dir = dir;
+      lastView.up = up;
+      setFlight(true);
+      if (ship) {
+        ship.landed = body;
+        hud.say(`Aboard, on ${nameOf(body)}. R or Space to lift off.`);
+      }
+      return;
+    }
     if (!walker || !parked || parked.body !== walkBody) {
       hud.say('Your ship is not here');
       return;
@@ -1629,6 +1846,62 @@ async function main() {
     return { eye, dir: sceneVector(s, v.dir), up: sceneVector(s, v.up) };
   };
 
+  const SHAPE_WALK_HELP = [
+    '<b>W / S</b> walk forward and back · <b>A / D</b> sideways · hold <b>Shift</b> to run',
+    '<b>Space</b> hops gently · <b>Shift + Space</b> leaps at 3.1 m/s, as on Earth (faster than most of these can hold)',
+    '<b>T</b> real time or sped up · <b>drag</b> or <b>arrows</b> to look around',
+    '<b>B</b> boards the ship when you are next to it · <b>Esc</b> stops walking',
+  ].join('<br>');
+  /** Advance someone on foot on a small body; return the camera for this frame. */
+  const walkShape = (w: ShapeWalker, simDt: number, dt: number) => {
+    const world = shapeWorld(walkBody);
+    const look = walkControls.look();
+    const ppr = innerHeight / (2 * Math.tan((fov * DEG) / 2));
+    w.look(world, look.dx / ppr + look.keyYaw * 1.6 * dt, -look.dy / ppr + look.keyPitch * 1.2 * dt);
+    const input = walkControls.input();
+    const event = w.step(world, simDt, dt, input);
+    if (event === 'landed' && w.airTime > 5) hud.say(`Hop: ${w.peak < 10 ? w.peak.toFixed(1) : w.peak.toFixed(0)} m high, ${formatDuration(w.airTime)} in the air`, 5);
+    const b = axesOf(walkBody);
+    const centre = system.position(walkBody);
+    const eye = add(centre, toSceneAxes(b, w.eye(world)));
+    const v = w.view(world);
+    if (event === 'escaped') {
+      escaped = true;
+      hud.say(`You left ${nameOf(walkBody)} at ${formatSlow(length(w.v) * 1000)}, faster than its escape speed of ${formatSlow(w.escapeSpeed(world) * 1000)}: nothing will bring you back down.`, 10);
+      lastView.eye = eye;
+      setWalking(undefined);
+    }
+    return { eye, dir: toSceneAxes(b, v.dir), up: toSceneAxes(b, v.up) };
+  };
+  /** A slow speed: mm/s, cm/s or m/s. */
+  const formatSlow = (ms: number) => (ms < 0.01 ? `${(ms * 1000).toPrecision(2)} mm/s` : ms < 1 ? `${(ms * 100).toPrecision(2)} cm/s` : `${ms.toFixed(1)} m/s`);
+  const updateShapeWalkHud = (w: ShapeWalker) => {
+    const world = shapeWorld(walkBody);
+    const g = length(w.effective(world));
+    const out: string[] = [];
+    const speed = length(w.v) * 1000;
+    const pace = w.pace(world, false) * 1000, run = w.pace(world, true) * 1000;
+    const state = !w.onGround ? 'in the air' : speed < pace * 0.05 ? 'standing' : speed > (pace + run) / 2 ? 'running' : 'walking';
+    out.push(`On foot on ${nameOf(walkBody)} · ${state}${speed >= pace * 0.05 ? ` ${formatSlow(speed)}` : ''}`);
+    out.push(`Gravity ${formatAccel(g)} (${(g / G0).toPrecision(2)} g) · escape speed ${formatSlow(w.escapeSpeed(world) * 1000)}`);
+    if (!w.onGround) {
+      const up = w.up(world);
+      const ground = world.raycast([w.p[0] + up[0] * 0.0005, w.p[1] + up[1] * 0.0005, w.p[2] + up[2] * 0.0005], [-up[0], -up[1], -up[2]], 50);
+      out.push(`Up ${formatDuration(w.airTime)}${ground ? `, ${((ground.t - 0.0005) * 1000).toFixed(1)} m above the ground` : ''}`);
+    } else out.push(`Walk ${formatSlow(pace)}, run ${formatSlow(run)} at this gravity`);
+    out.push(realTime || clock.rate === 1 ? 'Real time · T speeds it up' : `Time runs ${Math.round(clock.rate)}× faster, so walking looks as on Earth · T for real time`);
+    if (parked && parked.body === walkBody) {
+      const d = length(sub(w.p, parked.p, [0, 0, 0])) * 1000;
+      out.push(`Your ship: ${d < 1000 ? `${d.toFixed(0)} m` : formatDistance(d / 1000)}${d <= 20 ? ' · B to board' : ''}`);
+      const pScene = add(system.position(walkBody), toSceneAxes(axesOf(walkBody), parked.p));
+      markDir('target', sub(pScene, lastView.eye, [0, 0, 0]), 'Ship', false);
+    } else hud.mark('target', 0, 0, false);
+    hud.mark('nose', 0, 0, false);
+    hud.mark('prograde', 0, 0, false);
+    hud.mark('retrograde', 0, 0, false);
+    hud.set(out);
+  };
+
   const updateWalkHud = (w: Walker) => {
     const s = surfaces.get(walkBody)!;
     const world = walkWorld(walkBody);
@@ -1662,6 +1935,17 @@ async function main() {
   /** Draw the parked ship and Eagle's descent stage when the camera is near them. */
   const drawLanders = (eye: Vec3) => {
     const place = (model: Lander, body: number, p: Vec3, heading: number) => {
+      if (shapes.has(body)) {
+        const b = axesOf(body);
+        const centre = system.position(body);
+        const rel = sub(add(centre, toSceneAxes(b, p)), eye, [0, 0, 0]);
+        if (length(rel) > 30) return model.hide();
+        const { up, north } = shapeUp(body, p);
+        const sun = sub(system.position(10), centre, [0, 0, 0]);
+        const intensity = system.intensity(body);
+        model.update(rel, toSceneAxes(b, up), toSceneAxes(b, north), heading, [sun[0] / length(sun), sun[1] / length(sun), sun[2] / length(sun)], intensity, [intensity * 0.02, intensity * 0.016, intensity * 0.013]);
+        return;
+      }
       const s = surfaces.get(body);
       if (!s) return model.hide();
       const centre = system.position(body);
@@ -1773,6 +2057,7 @@ async function main() {
       `Sun: SDO/HMI ${sunMeta.time.slice(0, 16).replace('T', ' ')} UTC`,
       'Planets and moons: NASA/USGS mosaics (MESSENGER, Viking, Voyager, Galileo, Cassini, New Horizons), HST OPAL',
       'Saturn rings: Cassini RSS',
+      'Asteroid and comet shapes: OSIRIS-REx, Hayabusa2, Hayabusa, NEAR, Rosetta, New Horizons, DART, Deep Impact and Lucy teams, via NAIF, ESA, JAXA and the PDS',
       satelliteSource && `Satellites: ${satelliteSource}`,
       'Stars: ESA Gaia DR3, Hipparcos (XHIP), Bailer-Jones distances; dust: Edenhofer et al. 2024; exoplanets: NASA Exoplanet Archive; constellations: Stellarium',
       'Galaxies: UNGC, Cosmicflows-4, 2MRS, 6dFGS, SDSS; images: DSS2; CMB: Planck',
@@ -1902,7 +2187,7 @@ async function main() {
       hud.mark('retrograde', 0, 0, false);
     } else {
       out.push(`${s.landed !== undefined ? 'Landed' : 'Speed ' + formatSpeed(speed)} relative to ${refName}${length(frameVel) > 0 ? '’s ground' : ''}`);
-      if (s.landed !== undefined && surfaces.has(s.landed)) out.push('O to step outside');
+      if (s.landed !== undefined && (surfaces.has(s.landed) || shapes.has(s.landed))) out.push('O to step outside');
       if (speed > 1e-3) {
         markDir('prograde', v, '', false);
         markDir('retrograde', [-v[0], -v[1], -v[2]], '', false);
@@ -2070,8 +2355,12 @@ async function main() {
       return;
     }
     const traj = new Trajectory(buffer);
-    // The planets it passes, with their moons, so they sit where the spacecraft met them.
+    // The planets it passes, with their moons, so they sit where the spacecraft met them;
+    // the small bodies it visits, whose positions the trajectory is relative to there.
     for (const [id] of m.encounters) if (id !== 10) prepare(id);
+    for (const id of m.visits ?? []) prepare(id);
+    const centres = [...new Set(traj.centres)].filter((c) => c !== 10);
+    await waitFor(() => centres.every((c) => ephemeris.available(c)), 30000);
     if (missionView) scene.remove(missionView.group);
     missionView = new MissionView(m, traj, at);
     missionIndex = k;
@@ -2100,7 +2389,7 @@ async function main() {
     if (MISSIONS[k]) startMission(k);
   });
   /** Bodies near the spacecraft worth pacing and pulling for: the Sun and its encounters. */
-  const craftBodies = () => (missionView ? [10, ...missionView.mission.encounters.map(([id]) => id)].filter((id, i, all) => all.indexOf(id) === i && ephemeris.available(id, clock.tdb)) : []);
+  const craftBodies = () => (missionView ? [10, ...missionView.mission.encounters.map(([id]) => id), ...(missionView.mission.visits ?? [])].filter((id, i, all) => all.indexOf(id) === i && ephemeris.available(id, clock.tdb)) : []);
   const formatAccel = (kms2: number) => {
     const ms2 = kms2 * 1000;
     if (ms2 >= 0.1) return `${ms2.toPrecision(3)} m/s²`;
@@ -2145,7 +2434,11 @@ async function main() {
     const c = localBody(tdb);
     if (c !== 10) {
       const r = rel(c);
-      out.push(`${formatSpeed(r.s)} relative to ${bodyById(c).name}, ${formatDistance(r.d - bodyById(c).radius[0])} above it`);
+      // Over a shape model, the height above the ground below (its largest radius would put
+      // a craft low over Eros's waist underground).
+      const b = v.bodyAt(c, tdb);
+      const up = shapes.get(c)?.ready ? flightWorld.altitude(c, [p[0] - b[0], p[1] - b[1], p[2] - b[2]], tdb) : r.d - bodyById(c).radius[0];
+      out.push(`${formatSpeed(r.s)} relative to ${bodyById(c).name}, ${formatDistance(up)} above it`);
     } else {
       const escape = Math.sqrt((2 * GM[10]) / sun.d);
       out.push(`Escape speed from the Sun here ${formatSpeed(escape)}${sun.s > escape ? ': leaving the Solar System for good' : ''}`);
@@ -2210,6 +2503,27 @@ async function main() {
   eventSelect.addEventListener('change', () => endMission(), { capture: true });
   tourSelect.addEventListener('change', () => endMission(), { capture: true });
 
+  /** The HUD for a small body drawn from its shape model. */
+  const describeShape = (id: number, eye: Vec3): string[] => {
+    const view = shapes.get(id)!;
+    const ix = view.index!;
+    const b = axesOf(id);
+    const p = toBodyAxes(b, sub(eye, system.position(id), [0, 0, 0]));
+    const r = length(p);
+    const out: string[] = [];
+    const ground = shapeRadius(id, [p[0] / r, p[1] / r, p[2] / r]);
+    out.push(`Altitude ${formatDistance(Math.max(0, r - ground))} above the ground`);
+    const e = bodyById(id).radii;
+    const size = (km: number) => (km < 2 ? `${Math.round(km * 1000)} m` : `${km.toFixed(1)} km`);
+    out.push(`${size(2 * e[0])} × ${size(2 * e[1])} × ${size(2 * e[2])} · density ${Math.round(ix.density)} kg/m³${ix.gmMeasured ? '' : ' (assumed)'}`);
+    const surface = GM[id] / (ix.meanRadius * ix.meanRadius);
+    out.push(`Gravity about ${formatAccel(surface)} at the surface · escape speed about ${formatSpeed(Math.sqrt((2 * GM[id]) / ix.meanRadius))}`);
+    const w = flightWorld.spin(id, clock.tdb);
+    if (w) out.push(`Turns once every ${formatDuration((2 * Math.PI) / length(w))}`);
+    out.push(`Shape model: ${ix.faces.toLocaleString('en-US')} triangles (${ix.kept.toLocaleString('en-US')} drawn), ${ix.resolution * 1000 < 10 ? (ix.resolution * 1000).toFixed(1) : Math.round(ix.resolution * 1000)} m detail; smaller boulders computed`);
+    return out;
+  };
+
   // ---- frame loop -----------------------------------------------------------
   const nameEl = document.getElementById('focus-name')!;
   const detailEl = document.getElementById('focus-detail')!;
@@ -2247,7 +2561,8 @@ async function main() {
     if (walkPending && frameNumber > 2 && rig.anchor && (lastPending === 0 || now - startedAt > 20)) {
       walkPending = false;
       setWalking(rig.focus, rig.anchor.lon, rig.anchor.lat, rig.yaw);
-      if (params.has('look')) walker!.pitch = Number(params.get('look')) * DEG;
+      const w = walker ?? shapeWalker;
+      if (params.has('look') && w) w.pitch = Number(params.get('look')) * DEG;
       lookUp = 0;
     }
     // ?event=apophis plays the first event whose title has those words (t and rate still apply).
@@ -2313,6 +2628,13 @@ async function main() {
       rig.anchor = undefined;
       rig.distance = length(ship.rel);
       if (isHole(ship.ref)) holeRel = [...ship.rel];
+    } else if (shapeWalker) {
+      const view = walkShape(shapeWalker, clock.paused ? 0 : clock.tdb - tdbBefore, dt);
+      ({ eye, up } = view);
+      lookDir = view.dir;
+      rig.focus = walkBody;
+      rig.anchor = undefined;
+      rig.distance = length(sub(eye, system.position(walkBody), [0, 0, 0]));
     } else if (walker) {
       const view = walk(walker, dt);
       ({ eye, up } = view);
@@ -2325,7 +2647,7 @@ async function main() {
     rig.minDistance = rig.anchor ? 0.0015 : isDeep(focus.id) ? focus.radius * 0.02 : isHole(focus.id) ? bhs.minDistance(focus.id) : focus.radius * 1.0002;
     tours.update(now, rig.flying);
     adaptResolution(dt);
-    if (!ship && !walker) {
+    if (!ship && !onFoot()) {
       const solved = rig.solve(frameOf, now);
       ({ eye, target, up } = solved);
       const offset = solved.offset;
@@ -2345,6 +2667,22 @@ async function main() {
       if (h < ground) {
         const lifted = sceneVector(s, geodeticToBody(s.shape, lon, lat, ground));
         for (let k = 0; k < 3; k++) eye[k] = system.position(id)[k] + lifted[k];
+      }
+    }
+
+    // ... and above the shape models' ground (not under an overhang: from outside, along
+    // the line to the centre).
+    for (const [id, view] of shapes) {
+      if (!view.ready || !system.available(id) || shapeWalker) continue;
+      const c = system.position(id);
+      const b = axesOf(id);
+      const p = toBodyAxes(b, sub(eye, c, rel));
+      const r = length(p);
+      if (r > view.index!.radius * 1.2) continue;
+      const ground = shapeRadius(id, [p[0] / r, p[1] / r, p[2] / r], true) + 0.0015;
+      if (r < ground) {
+        const lifted = toSceneAxes(b, [(p[0] * ground) / r, (p[1] * ground) / r, (p[2] * ground) / r]);
+        for (let k = 0; k < 3; k++) eye[k] = c[k] + lifted[k];
       }
     }
 
@@ -2390,7 +2728,7 @@ async function main() {
       for (let k = 0; k < 3; k++) rel[k] = fwd[k] * c + u0[k] * sn;
       viewUp = [u0[0] * c - fwd[0] * sn, u0[1] * c - fwd[1] * sn, u0[2] * c - fwd[2] * sn];
     }
-    if (followSun && !rig.flying && !ship && !walker) {
+    if (followSun && !rig.flying && !ship && !onFoot()) {
       // The Sun in the middle, the local vertical up (as a camera on a tracking mount).
       const d = length(toSun);
       for (let k = 0; k < 3; k++) rel[k] = toSun[k] / d;
@@ -2471,6 +2809,35 @@ async function main() {
         const day = smoothstep(-0.2, 0.05, sunUp) * (1 - smoothstep(20, 80, altitude));
         daylight = Math.max(daylight, day * Math.min(1, sunVisible * 30));
       }
+    }
+    // Small bodies from their shape models: loaded when near, drawn (with their shadows)
+    // once a few pixels across; until then the plain globe stands in.
+    for (const [id, view] of shapes) {
+      if (!system.available(id)) continue;
+      const centre = system.position(id);
+      const centerRel = sub(centre, eye, [0, 0, 0]);
+      const d = length(centerRel);
+      const R = bodyById(id).radii[0];
+      if (d < R * 3e4) requestShape(id);
+      if (!view.ready || (R / d) * ppr < 3) {
+        view.hide();
+        hidden.delete(id);
+        continue;
+      }
+      hidden.add(id);
+      const b = axesOf(id);
+      const sunBody = toBodyAxes(b, sub(sunPos, centre, [0, 0, 0]));
+      const ls = length(sunBody);
+      const intensity = system.intensity(id);
+      const f: ShapeFrame = {
+        eyeBody: toBodyAxes(b, [-centerRel[0], -centerRel[1], -centerRel[2]]),
+        centerRel, bodyToScene: b, sunBody: [sunBody[0] / ls, sunBody[1] / ls, sunBody[2] / ls],
+        pixelsPerRadian: ppr, intensity, ambient: intensity * 0.0015,
+      };
+      const r = length(f.eyeBody);
+      if (r < view.index!.radius * 1.5) f.altitude = r - shapeRadius(id, [f.eyeBody[0] / r, f.eyeBody[1] / r, f.eyeBody[2] / r]);
+      view.update(f);
+      view.renderShadows(renderer, f);
     }
     // ---- stars: the octree loads what can be seen from here, to the current limit.
     const years = yearsSinceEpoch(clock.tdb);
@@ -2564,7 +2931,8 @@ async function main() {
     // dark rock more (Earth and the Moon keep the exposure their maps were made for).
     const focusBody = findBody(rig.focus);
     if (focusBody && (!surfaces.has(focusBody.id) || WORLD_IDS.has(focusBody.id)) && focusBody.id !== 10 && (!ship || rig.distance < 30 * focusBody.radius[0])) {
-      exposureTarget *= Math.min(2, Math.max(0.2, 0.11 / focusBody.albedo));
+      // Shape models have no map to keep its contrast: a little less, so relief reads.
+      exposureTarget *= Math.min(2, Math.max(0.2, (shapes.has(focusBody.id) ? 0.075 : 0.11) / focusBody.albedo));
     }
     // A spacecraft's white dish and foil reflect about half the light.
     if (isCraft(rig.focus)) exposureTarget *= 0.25;
@@ -2603,6 +2971,7 @@ async function main() {
     // Orbit lines are a map of the system: they fade out close to a surface.
     let altitude = Infinity;
     for (const [id, sf] of surfaces) altitude = Math.min(altitude, bodyToGeodetic(sf.shape, bodyVector(sf, sub(eye, system.position(id), rel)))[2]);
+    for (const [id, view] of shapes) if (view.ready && system.available(id)) altitude = Math.min(altitude, length(sub(eye, system.position(id), rel)) - view.index!.radius);
     system.orbitOpacity = skyAim ? 0 : smoothstep(100, 3000, altitude);
     // A planet's orbit line cuts across the view close up: fade it under 300 radii.
     sys.orbitOpacity = sys.isPlanet(rig.focus) ? smoothstep(30, 300, rig.distance / focus.radius) : 1;
@@ -2877,10 +3246,12 @@ async function main() {
     }
     if (ship) updateFlightHud(ship, eye);
     if (walker) updateWalkHud(walker);
+    if (shapeWalker) updateShapeWalkHud(shapeWalker);
     drawLanders(eye);
     // "Walk here" once the view is down near the ground of a body with terrain.
-    const nearGround = !ship && !rig.flying && surfaces.has(rig.focus) && (rig.anchor ? rig.distance < 40 : altitude < 40);
-    walkButton.hidden = !walker && !nearGround;
+    const nearShape = shapes.get(rig.focus)?.ready && rig.distance < Math.max(0.1, 0.3 * focus.radius);
+    const nearGround = !ship && !rig.flying && ((surfaces.has(rig.focus) && (rig.anchor ? rig.distance < 40 : altitude < 40)) || nearShape);
+    walkButton.hidden = !onFoot() && !nearGround;
     const lines: string[] = [];
     const s = surfaces.get(rig.focus);
     if (s) {
@@ -2890,6 +3261,8 @@ async function main() {
       lines.push(`Altitude ${formatDistance(h - ground)} above the ground`);
       lines.push(`${Math.abs(lat / DEG).toFixed(4)}° ${lat >= 0 ? 'N' : 'S'}, ${Math.abs(lon / DEG).toFixed(4)}° ${lon >= 0 ? 'E' : 'W'}`);
       if (sunVisible < 0.999) lines.push(sunVisible < 1e-6 ? 'Total solar eclipse' : `Sun ${(100 * (1 - sunVisible)).toFixed(1)}% covered`);
+    } else if (shapes.get(rig.focus)?.ready && !shapeWalker) {
+      lines.push(...describeShape(rig.focus, eye));
     } else if (isDeep(rig.focus)) {
       lines.push(...deep.describe(rig.focus, camMpc, rig.distance));
     } else if (holeRel) {
@@ -2920,7 +3293,7 @@ async function main() {
     } else if (smallFocus) {
       lines.push(focus.kind === 'comet' ? 'Comet' : focus.kind);
       lines.push(`Camera ${formatDistance(rig.distance)} away`);
-    } else {
+    } else if (!shapeWalker) {
       lines.push(`Camera altitude ${formatDistance(rig.distance - focus.radius)}`);
     }
     if (focus.id !== 10 && !isStar(focus.id) && !isDeep(focus.id) && !isHole(focus.id) && !isSys(focus.id)) {
@@ -2937,7 +3310,7 @@ async function main() {
     detailEl.textContent = lines.join('\n');
     utcEl.textContent = formatUtc(clock.utc);
     if (document.activeElement !== dateInput && frameNumber % 15 === 0) dateInput.value = new Date(clock.utc).toISOString().slice(0, 16);
-    const pending = [...surfaces.values()].reduce((n, x) => n + x.globe.pending, 0) + loading + stars.pending;
+    const pending = [...surfaces.values()].reduce((n, x) => n + x.globe.pending, 0) + [...shapes.values()].reduce((n, x) => n + x.pending, 0) + loading + stars.pending;
     lastPending = pending;
     document.body.dataset.ready = 'true';
     document.body.dataset.tiles = pending === 0 && !rig.flying ? 'idle' : 'loading';
@@ -2952,7 +3325,7 @@ function starMass(star: NamedStar): number {
 }
 
 /** Label priority: the Sun and planets first, then dwarf planets, moons, asteroids. */
-const KIND_ORDER: Record<Body['kind'], number> = { star: 0, planet: 1, dwarf: 2, moon: 3, asteroid: 4 };
+const KIND_ORDER: Record<Body['kind'], number> = { star: 0, planet: 1, dwarf: 2, moon: 3, asteroid: 4, comet: 4, kbo: 4 };
 const LABEL_ORDER = [...BODIES].sort((a, b) => KIND_ORDER[a.kind] - KIND_ORDER[b.kind] || (a.id === 301 ? -1 : b.id === 301 ? 1 : 0));
 
 /** A world's relief map (pipeline/build_worlds.py relief_map) as raw RGBA bytes. */

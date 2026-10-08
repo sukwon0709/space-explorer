@@ -84,6 +84,7 @@ export class SolarSystem {
       icrfToScene(this.ephemeris.position(id, tdb, scratch), view.pos);
       if (this.orientation.has(id)) this.orientation.bodyToScene(id, tdb, view.bodyToScene);
       else if (hasRotation(id)) iauBodyToScene(id, tdb, view.bodyToScene);
+      else if (view.body.shape && view.body.orbit && view.body.orbit.around !== 10) lockedFrame(this.ephemeris, id, view.body.orbit.around, tdb, view.bodyToScene);
       else icrfToBodyAsScene(eulerMatrix(view.body.pole[0] * DEG, view.body.pole[1] * DEG, 0), view.bodyToScene);
       if (view.orbit && view.body.orbit && this.ephemeris.available(view.body.orbit.around, tdb)) {
         const periodSeconds = view.body.orbit.periodDays * 86400;
@@ -222,6 +223,31 @@ export class SolarSystem {
     }
     view.orbit!.sampledAt = tdb;
   }
+}
+
+/**
+ * A tidally locked moon's axes (Dimorphos): +x toward its primary, +z along the orbit
+ * normal, as the DART team's body-fixed frame defines them. Columns of body -> scene.
+ */
+export function lockedFrame(ephemeris: Ephemeris, id: number, primary: number, tdb: number, out: Mat3): Mat3 {
+  const a: Vec3 = [0, 0, 0], b: Vec3 = [0, 0, 0];
+  const r = icrfToScene(sub(ephemeris.position(id, tdb, a), ephemeris.position(primary, tdb, b), [0, 0, 0]));
+  const r1 = icrfToScene(sub(ephemeris.position(id, tdb + 60, a), ephemeris.position(primary, tdb + 60, b), [0, 0, 0]));
+  const v: Vec3 = [r1[0] - r[0], r1[1] - r[1], r1[2] - r[2]];
+  const x = norm([-r[0], -r[1], -r[2]]);
+  const z = norm([r[1] * v[2] - r[2] * v[1], r[2] * v[0] - r[0] * v[2], r[0] * v[1] - r[1] * v[0]]);
+  const y: Vec3 = [z[1] * x[2] - z[2] * x[1], z[2] * x[0] - z[0] * x[2], z[0] * x[1] - z[1] * x[0]];
+  for (let k = 0; k < 3; k++) {
+    out[k * 3] = x[k];
+    out[k * 3 + 1] = y[k];
+    out[k * 3 + 2] = z[k];
+  }
+  return out;
+}
+
+function norm(v: Vec3): Vec3 {
+  const l = Math.hypot(v[0], v[1], v[2]);
+  return [v[0] / l, v[1] / l, v[2] / l];
 }
 
 /** The planet a body belongs with (itself for planets), or 10 for the Sun's own family. */
