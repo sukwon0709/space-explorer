@@ -28,6 +28,10 @@ import { MilkyWayGlow } from './render/milkyway';
 import { icrsPcToGalactocentric } from './core/milkyway';
 import { DeepSky } from './deepsky';
 import { BlackHoles, type SStar } from './blackholes';
+import { COSMIC_KEYS, CosmicEvents, GW_PEAK, type CosmicData, type CosmicKey } from './cosmic';
+import { CosmicPanel, type CosmicChart } from './ui/cosmicpanel';
+import { DAY as DAY_S, SN1987A } from './core/supernova';
+import { bandpass, matchModel } from './core/merger';
 import { EhtPanel, type EhtMeta } from './ui/ehtpanel';
 import { MPC_KM, type GalaxyIndex } from './core/galaxies';
 import type { SkyImage } from './render/images';
@@ -35,7 +39,7 @@ import type { GalaxyModelSpec } from './core/galaxymodel';
 import { CmbLayer } from './render/cmb';
 import { PC_KM, apparentMagnitude, namedStarPosition, parseStarIndex, yearsSinceEpoch, type Exoplanet, type NamedStar } from './core/stars';
 import { NAMED_SATELLITES, SatelliteLayer } from './render/satellites';
-import { formatDistance, formatUtc } from './ui/format';
+import { formatDistance, formatUtc, formatYears as formatYearCount } from './ui/format';
 import { eventGroups, type EventCatalogue, type SkyEvent } from './ui/events';
 import eventCatalogue from './generated/events.json';
 import { Visitor } from './render/visitors';
@@ -189,6 +193,9 @@ function nearestSite(body: number, lon: number, lat: number): { name: string; di
 }
 
 async function main() {
+  // The live cosmic events' data (pipeline/fetch_cosmic.py), loaded alongside the rest.
+  const cosmicLoad: Promise<CosmicData> = Promise.all(['sn1987a', 'gw150914', 'pms'].map((name) => fetch(`${BASE}data/cosmic/${name}.json`).then((r) => (r.ok ? r.json() : undefined)).catch(() => undefined)))
+    .then(([sn1987a, gw, pms]) => ({ sn1987a, gw, pms }));
   const [ephemeris, orientation, starIndexRaw, namedStars, constellationData, dust, cloudTexture, satelliteSnapshot, smallBuffer, asteroidsBuffer, cometData, asteroidNames, saturnRings, galaxyIndex, galaxyBuffer, skyImages, sstarData, ehtMeta, galaxyModels, systemsData] = await Promise.all([
     Ephemeris.load(`${BASE}data/de440.bin`),
     Orientation.load(`${BASE}data/orientation.bin`),
@@ -274,6 +281,12 @@ async function main() {
   const bhs = new BlackHoles(stars.material, starIndex.teff, sstarData);
   scene.add(bhs.stars.points);
   bhs.view.setQuality(quality === 'low' ? 'low' : quality === 'high' ? 'high' : 'normal');
+  // Live cosmic events: supernovae, a star being born, two black holes merging.
+  const cosmicData = await cosmicLoad;
+  const betelgeuseIndex = namedStars.findIndex((s) => s.name === 'Betelgeuse');
+  const cosmic = new CosmicEvents(stars.material, teffCode, cosmicData, () => (betelgeuseIndex >= 0 ? sys.position(STAR_ID + betelgeuseIndex, clock.tdb) : undefined));
+  scene.add(cosmic.group);
+  cosmic.lens.setQuality(quality === 'low' ? 'low' : quality === 'high' ? 'high' : 'normal');
 
   const textureLoader = new THREE.TextureLoader();
   const sunMap = await textureLoader.loadAsync(`${BASE}data/maps/sun.jpg`).catch(() => undefined);
@@ -452,6 +465,7 @@ async function main() {
   });
   for (const t of deep.targets) targets.set(t.id, { id: t.id, name: t.name, kind: t.kind, radius: t.radius });
   for (const t of bhs.targets) targets.set(t.id, { id: t.id, name: t.name, kind: t.kind, radius: t.radius });
+  for (const t of cosmic.targets) targets.set(t.id, { id: t.id, name: t.name, kind: t.kind, radius: t.radius });
   for (const t of sys.targets) targets.set(t.id, { id: t.id, name: t.name, kind: t.kind, radius: t.radius });
   MISSIONS.forEach((m, k) => {
     if (MISSION_DATA[m.slug]) targets.set(CRAFT_ID + k, { id: CRAFT_ID + k, name: m.name, kind: 'spacecraft', radius: 0.005 });
@@ -460,6 +474,7 @@ async function main() {
   /** The spacecraft being followed, once its trajectory has loaded. */
   let missionView: MissionView | undefined;
   const isHole = (id: number) => bhs.has(id);
+  const isCosmic = (id: number) => cosmic.has(id);
   const isStar = (id: number) => id >= STAR_ID && id < STAR_ID + namedStars.length;
   /** A companion star or exoplanet (systems.ts). */
   const isSys = (id: number) => sys.has(id);
@@ -470,6 +485,7 @@ async function main() {
   const positionOf = (id: number, out: Vec3 = [0, 0, 0]): Vec3 => {
     if (isDeep(id)) return deep.position(id, out);
     if (isHole(id)) return bhs.position(id, out);
+    if (isCosmic(id)) return cosmic.position(id, out);
     if (isStar(id) || isSys(id)) return sys.position(id, clock.tdb, out);
     if (isCraft(id)) {
       if (missionView && missionView.mission === MISSIONS[id - CRAFT_ID]) return missionView.position(clock.tdb, out);
@@ -515,6 +531,7 @@ async function main() {
     const s = surfaces.get(id);
     if (isDeep(id)) return deep.frame(id, centre) ?? { origin: centre, ...SCENE_BASIS };
     if (isHole(id)) return bhs.frame(id, centre);
+    if (isCosmic(id)) return cosmic.frame(id, centre);
     if (anchor && shapes.has(id)) {
       // A shape model: the look point is where the line from the centre meets the surface.
       const dir = radialDir(anchor.lon, anchor.lat);
@@ -582,6 +599,7 @@ async function main() {
     if (surfaces.has(id) || shapes.has(id)) return { distance: target.radius * 3, yaw: 0, pitch: 1.25, anchor: sunlitAnchor(id) };
     if (isDeep(id)) return { ...deep.view(id, target.radius), anchor: undefined };
     if (isHole(id)) return { ...bhs.viewFor(id), anchor: undefined };
+    if (isCosmic(id)) return { ...cosmic.viewFor(id), anchor: undefined };
     const [yaw, pitch] = sunlitView(id);
     const body = findBody(id);
     const distance = isStar(id) || (isSys(id) && !sys.isPlanet(id)) ? target.radius * 6 : isSys(id) ? target.radius * 4 : !body ? 3e6 : RINGS[id] && id === 699 ? target.radius * 7 : target.radius * 4;
@@ -717,6 +735,7 @@ async function main() {
   });
   for (const t of deep.targets) for (const alias of t.aliases) if (!byName.has(alias.toLowerCase())) byName.set(alias.toLowerCase(), t.id);
   for (const t of bhs.targets) for (const alias of t.aliases) if (!byName.has(alias.toLowerCase())) byName.set(alias.toLowerCase(), t.id);
+  for (const t of cosmic.targets) for (const alias of t.aliases) if (!byName.has(alias.toLowerCase())) byName.set(alias.toLowerCase(), t.id);
   for (const t of sys.targets) for (const alias of t.aliases) if (!byName.has(alias.toLowerCase())) byName.set(alias.toLowerCase(), t.id);
   for (const f of sys.model.featured) if (!byName.has(f.title.toLowerCase())) byName.set(f.title.toLowerCase(), STAR_ID + f.host);
   const deepById = new Map(deep.targets.map((t) => [t.id, t]));
@@ -2679,6 +2698,211 @@ async function main() {
     missionSelect.blur();
     if (MISSIONS[k]) startMission(k);
   });
+
+  // ---- live cosmic events (cosmic.ts) -----------------------------------------
+  // The supernovae run on the main clock (the date the light reaches Earth); the cloud's
+  // collapse and the merger have clocks of their own, millions of years and milliseconds.
+  let cosmicPace = true;
+  const SN_DAYS: [number, number] = [-1.3, Math.log10(40 * 365.25)];
+  const BIRTH_YEARS: [number, number] = [3, 8];
+  const Z1 = 1.09;
+  /** Merger timeline: log of the time left from 1 s to 1 ms, then the ringing to 0.1 s after. */
+  const mergerU = (t: number) => (t < -0.001 ? (0.85 * -Math.log10(-t)) / 3 : t < 0 ? 0.85 : 0.85 + 0.15 * Math.min(1, t / 0.1));
+  const mergerT = (u: number) => (u < 0.85 ? -(10 ** ((-3 * u) / 0.85)) : ((u - 0.85) / 0.15) * 0.1);
+  const isSupernova = (key: CosmicKey | undefined): key is 'sn1987a' | 'betelgeuse' => key === 'sn1987a' || key === 'betelgeuse';
+  const cosmicCharts = new Map<CosmicKey, CosmicChart>();
+  const logTicks = (lo: number, hi: number, label: (v: number) => string): Array<[number, string]> => {
+    const out: Array<[number, string]> = [];
+    for (let v = Math.ceil(lo); v <= hi; v++) out.push([v, label(v)]);
+    return out;
+  };
+  const dayLabel = (v: number) => (v < 0 ? `${(10 ** v * 24).toFixed(0)} h` : v < 2.5 ? `${10 ** v} d` : `${(10 ** v / 365.25).toPrecision(2)} yr`);
+  const cosmicChart = (key: CosmicKey): CosmicChart => {
+    const cached = cosmicCharts.get(key);
+    if (cached) return cached;
+    let chart: CosmicChart;
+    if (isSupernova(key)) {
+      const s = cosmic.sn[key];
+      const model: Array<[number, number]> = [];
+      for (let x = SN_DAYS[0]; x <= SN_DAYS[1]; x += 0.01) model.push([x, Math.log10(s.curve.luminosity(10 ** x))]);
+      const pts = cosmicData.sn1987a?.points ?? [];
+      chart = {
+        x: SN_DAYS, y: [35.5, 42.6], xLabel: 'time since first light', yLabel: 'log luminosity, erg/s',
+        lines: [{ points: model, color: '#ffb35c', label: key === 'sn1987a' ? 'model (computed)' : 'computed' }],
+        dots: key === 'sn1987a' ? [
+          { points: pts.filter((p) => p[2] === 'S91').map((p) => [Math.log10(p[0]), p[1]]), color: '#e8eefc', label: 'measured: Suntzeff 1991' },
+          { points: pts.filter((p) => p[2] === 'B91').map((p) => [Math.log10(p[0]), p[1]]), color: '#7fb2ff', label: 'Bouchet 1991' },
+        ] : [],
+        ticks: logTicks(SN_DAYS[0], SN_DAYS[1], dayLabel),
+      };
+    } else if (key === 'b68') {
+      const lum: Array<[number, number]> = [], acc: Array<[number, number]> = [], mass: Array<[number, number]> = [];
+      for (let x = BIRTH_YEARS[0]; x <= BIRTH_YEARS[1]; x += 0.02) {
+        const st = cosmic.birth!.state(10 ** x);
+        if (st.star > 0) lum.push([x, Math.log10(Math.max(st.luminosity, 1e-3))]);
+        if (st.accretion > 1e-9) acc.push([x, Math.log10(st.accretion / 1e-6)]);
+        mass.push([x, Math.log10(Math.max(st.star, 1e-3) / 0.1)]);
+      }
+      chart = {
+        x: BIRTH_YEARS, y: [-2, 2.5], xLabel: 'years since the collapse began', yLabel: 'log scale',
+        lines: [
+          { points: lum, color: '#ffd27a', label: 'light (Suns)' },
+          { points: acc, color: '#7fb2ff', label: 'accretion (1e-6 Suns/yr)' },
+          { points: mass, color: '#e8eefc', label: 'star mass (0.1 Suns)' },
+        ],
+        ticks: logTicks(BIRTH_YEARS[0], BIRTH_YEARS[1], (v) => (v < 6 ? `${10 ** (v - 3)}k` : `${10 ** (v - 6)}M`)),
+      };
+    } else {
+      // What LIGO's Hanford detector recorded (band-passed 35-350 Hz), and the model filtered alike and fitted in amplitude and phase.
+      const gw = cosmicData.gw;
+      const lines: CosmicChart['lines'] = [];
+      if (gw) {
+        const t0 = gw.t0 - GW_PEAK;
+        const obs: Array<[number, number]> = [];
+        gw.observedH.forEach((v, k) => obs.push([t0 + k * gw.dt, v]));
+        const fit = matchModel(cosmic.binary, gw.observedH, t0, gw.dt, [35, 350], [-0.003, 0.003, 0.0005]);
+        const model: Array<[number, number]> = [];
+        fit.series.forEach((v, k) => model.push([t0 + k * gw.dt, v]));
+        lines.push({ points: obs, color: 'rgba(232,238,252,0.55)', label: 'LIGO Hanford, measured' }, { points: model, color: '#5cd0ff', label: `model (overlap ${fit.overlap.toFixed(2)})` });
+      }
+      chart = {
+        x: [-0.22, 0.06], y: [-1.4, 1.4], xLabel: 'seconds at Earth from the peak', yLabel: 'strain ×1e-21',
+        lines, ticks: [[-0.2, '-0.2 s'], [-0.15, '-0.15'], [-0.1, '-0.1'], [-0.05, '-0.05'], [0, '0'], [0.05, '+0.05']],
+      };
+    }
+    cosmicCharts.set(key, chart);
+    return chart;
+  };
+  /** The chirp as sound: the computed strain at LIGO's own frequencies, from 1.2 s before the peak. */
+  let audio: AudioContext | undefined;
+  const playChirp = () => {
+    audio ??= new AudioContext();
+    const rate = audio.sampleRate;
+    const start = -1.2, end = 0.08;
+    const n = Math.floor((end - start) * rate);
+    const buffer = audio.createBuffer(1, n, rate);
+    const data = buffer.getChannelData(0);
+    let peak = 0;
+    for (let k = 0; k < n; k++) {
+      data[k] = cosmic.binary.strainAtEarth(start + k / rate);
+      peak = Math.max(peak, Math.abs(data[k]));
+    }
+    const filtered = bandpass(data, 1 / rate, 30, 400);
+    for (let k = 0; k < n; k++) data[k] = (0.9 * filtered[k]) / peak * Math.min(1, k / (0.2 * rate));
+    const src = audio.createBufferSource();
+    src.buffer = buffer;
+    src.connect(audio.destination);
+    src.start();
+    hud.say('The chirp at its real pitch, 35 to 250 Hz: headphones help', 4);
+  };
+  const cosmicKey = () => cosmicPanel.key as CosmicKey | undefined;
+  const seekCosmic = (u: number) => {
+    const key = cosmicKey();
+    if (!key) return;
+    if (isSupernova(key)) {
+      const c = cosmic.sn[key].collapse;
+      if (c !== undefined) clock.setUtc(c + 10 ** (SN_DAYS[0] + u * (SN_DAYS[1] - SN_DAYS[0])) * DAY_S * 1000);
+    } else if (key === 'b68') cosmic.birthYears = u < 0.005 ? 0 : 10 ** (BIRTH_YEARS[0] + u * (BIRTH_YEARS[1] - BIRTH_YEARS[0]));
+    else cosmic.mergerTime = mergerT(u);
+  };
+  const cosmicPanel = new CosmicPanel(document.getElementById('cosmic')!, {
+    seek: seekCosmic,
+    play: (on) => {
+      if (isSupernova(cosmicKey())) clock.paused = !on;
+      else cosmic.playing = on;
+    },
+    pace: (on) => {
+      cosmicPace = on;
+      cosmic.paced = on;
+    },
+    listen: playChirp,
+    close: () => cosmicPanel.close(),
+  });
+  const SUMMARIES: Record<CosmicKey, string> = {
+    sn1987a: 'A blue supergiant in the Large Magellanic Cloud collapses. Watch the fireball expand and cool, the ejecta turn see-through, and the flash and then the blast wave light up its rings.',
+    betelgeuse: 'If Betelgeuse exploded now: computed for its size and mass. For three months it would outshine the half Moon in our sky.',
+    b68: 'Barnard 68 is a cold cloud on the edge of collapse. Follow it into a star with a disc and jets, then a young star settling onto the main sequence.',
+    gw150914: 'Two black holes of 36 and 31 Suns in their last orbits, as LIGO heard them: their light bending, the waves spreading out, one hole ringing down.',
+  };
+  /** Start an event: its clock at `at` (days, years or seconds; default its start), the panel, and the view. */
+  const startCosmic = (key: CosmicKey, at?: number, view?: { dist?: number; yaw?: number; pitch?: number }, keepView = false) => {
+    setFlight(false);
+    setWalking(undefined);
+    tours.stop();
+    endMission();
+    const id = cosmic.idOf(key);
+    if (key === 'betelgeuse') {
+      if (at === undefined) cosmic.detonate(clock.utc);
+      else cosmic.sn.betelgeuse.collapse = clock.utc - at * DAY_S * 1000;
+    }
+    if (key === 'sn1987a') clock.setUtc(SN1987A.collapse! + (at ?? -0.1) * DAY_S * 1000);
+    if (isSupernova(key)) {
+      clock.paused = false;
+      clock.rate = CosmicEvents.pace(cosmic.day(key, clock.utc) ?? 0);
+    }
+    if (key === 'b68') cosmic.birthYears = at ?? 0;
+    if (key === 'gw150914') cosmic.mergerTime = at ?? -0.6;
+    cosmic.playing = true;
+    cosmic.paced = cosmicPace = true;
+    const v = cosmic.viewFor(id);
+    if (!keepView) {
+      lookUp = 0;
+      skyAim = undefined;
+      followSun = false;
+      fov = 50;
+    }
+    if (keepView) { /* watching from where the camera is (?cosmic= with ?focus=) */ } else if (view) rig.flyTo(id, view.dist ?? v.distance, performance.now() / 1000, view.yaw ?? v.yaw, view.pitch ?? v.pitch, undefined, 0.01);
+    else rig.flyTo(id, v.distance, performance.now() / 1000, v.yaw, v.pitch);
+    cosmicPanel.open(key, targets.get(id)!.name, SUMMARIES[key], cosmicChart(key), key === 'gw150914');
+    hud.say(SUMMARIES[key], 8);
+  };
+  /** Panel and pacing, every frame. */
+  const updateCosmic = (dt: number) => {
+    const key = cosmicKey();
+    if (!key) return;
+    cosmic.tick(dt, key);
+    if (isSupernova(key)) {
+      const day = cosmic.day(key, clock.utc) ?? 0;
+      if (cosmicPace && !clock.paused) clock.rate = CosmicEvents.pace(day);
+      cosmicPanel.setPlaying(!clock.paused);
+      const x = Math.log10(Math.max(day, 10 ** SN_DAYS[0]));
+      const when = new Date(clock.utc).toISOString().slice(0, 10);
+      cosmicPanel.update(x, (x - SN_DAYS[0]) / (SN_DAYS[1] - SN_DAYS[0]), day < 0 ? `${(-day * 24).toFixed(1)} hours before the first light · ${when}` : `Day ${day < 100 ? day.toFixed(1) : Math.round(day).toLocaleString('en-US')} · Earth sees this on ${when}`);
+    } else if (key === 'b68') {
+      cosmicPanel.setPlaying(cosmic.playing);
+      const y = cosmic.birthYears;
+      const st = cosmic.protostar;
+      cosmicPanel.update(Math.log10(Math.max(y, 1000)), y <= 0 ? 0 : (Math.log10(Math.max(y, 1000)) - BIRTH_YEARS[0]) / (BIRTH_YEARS[1] - BIRTH_YEARS[0]),
+        y <= 0 ? 'Barnard 68 today' : `${formatYearCount(y)} · ${st && st.star > 0 ? `class ${st.stage}, ${st.star.toFixed(2)} Suns` : 'collapsing, no star yet'}`);
+    } else {
+      cosmicPanel.setPlaying(cosmic.playing);
+      const t = cosmic.mergerTime;
+      cosmicPanel.update(t * Z1, mergerU(t), t < 0 ? `${(-t * 1000).toFixed(t > -0.1 ? 1 : 0)} ms to the merger · ${cosmic.binary.frequency(t).detector.toFixed(0)} Hz at Earth` : `${(t * 1000).toFixed(1)} ms after the merger`);
+    }
+  };
+  // In the Events menu, after the sky's own events.
+  const cosmicGroup = document.createElement('optgroup');
+  cosmicGroup.label = 'Cosmic events';
+  const COSMIC_TITLES: Record<CosmicKey, string> = {
+    sn1987a: 'Supernova 1987A explodes · 23 Feb 1987',
+    betelgeuse: 'Betelgeuse explodes (computed) · now',
+    b68: 'A star is born in Barnard 68 (computed)',
+    gw150914: 'Black holes merge: GW150914 · 14 Sep 2015',
+  };
+  for (const key of COSMIC_KEYS) {
+    const o = document.createElement('option');
+    o.value = `cosmic:${key}`;
+    o.textContent = COSMIC_TITLES[key];
+    cosmicGroup.append(o);
+  }
+  eventSelect.append(cosmicGroup);
+  eventSelect.addEventListener('change', () => {
+    const v = eventSelect.value;
+    if (!v.startsWith('cosmic:')) return;
+    eventSelect.value = '';
+    eventSelect.blur();
+    startCosmic(v.slice(7) as CosmicKey);
+  });
   /** Bodies near the spacecraft worth pacing and pulling for: the Sun and its encounters. */
   const craftBodies = () => (missionView ? [10, ...missionView.mission.encounters.map(([id]) => id), ...(missionView.mission.visits ?? [])].filter((id, i, all) => all.indexOf(id) === i && ephemeris.available(id, clock.tdb)) : []);
   const formatAccel = (kms2: number) => {
@@ -2862,6 +3086,20 @@ async function main() {
       const ev = eventList.find((e) => words.every((w) => e.title.toLowerCase().includes(w)));
       if (ev) playEvent(ev, params.has('t') ? startTime : undefined, params.has('rate') ? Number(params.get('rate')) : undefined);
     }
+    // ?cosmic=sn1987a&at=100 starts a cosmic event at a moment of its own: days for the
+    // supernovae, years for b68, seconds from the peak for gw150914 (dist, yaw, pitch apply).
+    if (frameNumber === 2 && params.has('cosmic')) {
+      const key = params.get('cosmic') as CosmicKey;
+      if (COSMIC_KEYS.includes(key)) {
+        startCosmic(key, params.has('at') ? Number(params.get('at')) : undefined, params.has('dist') && !params.has('focus') ? { dist: Number(params.get('dist')), yaw: params.has('yaw') ? Number(params.get('yaw')) : undefined, pitch: params.has('pitch') ? Number(params.get('pitch')) : undefined } : undefined, params.has('focus'));
+        if (params.has('rate')) {
+          cosmicPace = cosmic.paced = false;
+          clock.rate = Number(params.get('rate')) || 1;
+          clock.paused = Number(params.get('rate')) === 0;
+          cosmic.playing = Number(params.get('rate')) !== 0;
+        }
+      }
+    }
     // ?mission=voyager-2 rides along (t, dist, heading and tilt apply).
     if (frameNumber === 2 && params.has('mission')) {
       const k = MISSIONS.findIndex((m) => m.slug === params.get('mission'));
@@ -2911,6 +3149,8 @@ async function main() {
     // Near a black hole the camera is placed from the hole itself: its scene position
     // (hundreds of parsecs out) is far too coarse for a horizon tens of km across.
     let holeRel: Vec3 | undefined;
+    // So too the merger's binary, 404 Mpc out (cosmic.ts).
+    let cosmicRel: Vec3 | undefined;
     if (ship) {
       const view = flyShip(ship, tdbBefore, dt);
       ({ eye, up } = view);
@@ -2935,7 +3175,7 @@ async function main() {
       rig.distance = length(sub(eye, system.position(walkBody), [0, 0, 0]));
     }
     const focus = targets.get(rig.focus)!;
-    rig.minDistance = rig.anchor ? 0.0015 : isDeep(focus.id) ? focus.radius * 0.02 : isHole(focus.id) ? bhs.minDistance(focus.id) : focus.radius * 1.0002;
+    rig.minDistance = rig.anchor ? 0.0015 : isDeep(focus.id) ? focus.radius * 0.02 : isHole(focus.id) ? bhs.minDistance(focus.id) : isCosmic(focus.id) ? cosmic.minDistance(focus.id, clock.utc) : focus.radius * 1.0002;
     tours.update(now, rig.flying);
     adaptResolution(dt);
     if (!ship && !onFoot()) {
@@ -2945,6 +3185,10 @@ async function main() {
       if (isHole(rig.focus)) {
         const c = bhs.position(rig.focus);
         holeRel = [offset[0] + (target[0] - c[0]), offset[1] + (target[1] - c[1]), offset[2] + (target[2] - c[2])];
+      }
+      if (isCosmic(rig.focus)) {
+        const c = cosmic.position(rig.focus);
+        cosmicRel = [offset[0] + (target[0] - c[0]), offset[1] + (target[1] - c[1]), offset[2] + (target[2] - c[2])];
       }
     }
 
@@ -3008,6 +3252,8 @@ async function main() {
 
     // Floating origin: the camera sits at the three.js origin; the world moves around it.
     if (lookDir) [rel[0], rel[1], rel[2]] = lookDir;
+    // Out at the merger the scene's coordinates are far too coarse: aim from the offset.
+    else if (cosmicRel && cosmic.precise(rig.focus) && !rig.flying) [rel[0], rel[1], rel[2]] = [-cosmicRel[0], -cosmicRel[1], -cosmicRel[2]];
     else sub(target, eye, rel);
     let viewUp: Vec3 = up;
     if (lookUp !== 0) {
@@ -3200,6 +3446,7 @@ async function main() {
     stars.hideWithin = Math.max(sysHide, isStar(rig.focus) && rig.distance < focus.radius * 200 ? (1.5 * rig.distance + CATALOGUE_PRECISION * Math.hypot(...positionOf(rig.focus))) / PC_KM : 0);
     bhs.radio = layers.radio;
     stars.hideWithin = Math.max(stars.hideWithin, bhs.update(eye, rig.focus, holeRel, clock.tdb));
+    cosmic.update({ eye, focus: rig.focus, rel: cosmicRel, utc: clock.utc, tdb: clock.tdb, dt, ppr, pixelRatio: renderer.getPixelRatio(), surfaceLight });
 
     // Exposure follows the eye: sunlit ground at the focus body's distance from the Sun
     // looks the same everywhere, the Sun's own surface is shown at a readable level up
@@ -3259,6 +3506,7 @@ async function main() {
     // An asteroid or comet passing Earth (from an event).
     visitor?.update(earthRel, clock.tdb);
     updateMission(eye, ppr, dt);
+    updateCosmic(dt);
 
     // Orbit lines are a map of the system: they fade out close to a surface.
     let altitude = Infinity;
@@ -3291,6 +3539,17 @@ async function main() {
       };
       bhs.draw(renderer, scene, camera, rig.focus, eye, holeRel, clock.tdb, frameNumber, ppr, (face, size) => setup(face, size / 2, size), () => setup(camera, ppr));
       setRelativity(beta, camera);
+    } else if (cosmicRel && cosmic.lensing(rig.focus, cosmicRel, ppr)) {
+      // The merging holes bend the light of everything behind them.
+      const galCam = icrsPcToGalactocentric(camPc);
+      const glowScale = (1 - 0.98 * daylight) * 10 ** (-0.4 * (26.402 - muRef - boost));
+      const setup = (cam: THREE.PerspectiveCamera, p: number, size?: number) => {
+        su.uPixelsPerRadian.value = p;
+        glow.update(renderer, cam, galCam, limit, glowScale, size);
+        deep.update(camMpc, galaxyMsat, p, 1 - 0.98 * daylight, rig.distance);
+        cmb?.update(cam, camMpc, cmbOpacity, surfaceLight, cmbPoint);
+      };
+      cosmic.draw(renderer, scene, camera, eye, cosmicRel, frameNumber, (face, size) => setup(face, size / 2, size), () => setup(camera, ppr));
     } else renderer.render(scene, camera);
 
     // Labels: projected from camera-relative float64 positions. Placed in order of
@@ -3559,6 +3818,8 @@ async function main() {
       lines.push(...deep.describe(rig.focus, camMpc, rig.distance));
     } else if (holeRel) {
       lines.push(...bhs.describe(rig.focus, holeRel, clock.tdb));
+    } else if (isCosmic(rig.focus)) {
+      lines.push(...cosmic.describe(rig.focus, cosmicRel ?? sub(eye, positionOf(rig.focus), [0, 0, 0]), clock.utc));
     } else if (isSys(rig.focus)) {
       lines.push(...sys.describe(rig.focus, eye, clock.tdb));
     } else if (isStar(rig.focus)) {
@@ -3588,7 +3849,7 @@ async function main() {
     } else if (!shapeWalker) {
       lines.push(`Camera altitude ${formatDistance(rig.distance - focus.radius)}`);
     }
-    if (focus.id !== 10 && !isStar(focus.id) && !isDeep(focus.id) && !isHole(focus.id) && !isSys(focus.id)) {
+    if (focus.id !== 10 && !isStar(focus.id) && !isDeep(focus.id) && !isHole(focus.id) && !isSys(focus.id) && !isCosmic(focus.id)) {
       lines.push(`${(fromSun / AU).toFixed(4)} AU from the Sun`);
       lines.push(`Sunlight takes ${formatLightTime(fromSun)} to arrive`);
     }

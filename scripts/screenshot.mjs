@@ -178,6 +178,22 @@ const views = {
   'transit-mercury-2019': `event=transit%20mercury%202019&t=2019-11-11T15:19:48Z`,
   'phobos-transit': `event=phobos%202%20apr%202022&t=2022-04-02T10:54:47Z`,
   'apophis': `event=apophis&t=2029-04-13T21:45:00Z`,
+  // Live cosmic events (?cosmic=key&at=days | years | seconds from the peak).
+  'sn1987a-day1': `cosmic=sn1987a&at=1&dist=5e9&pitch=1.1`,
+  'sn1987a-day40': `cosmic=sn1987a&at=40&dist=4e10&pitch=1.1`,
+  'sn1987a-flash-echo': `cosmic=sn1987a&at=300`,
+  'sn1987a-ejecta-2000': `cosmic=sn1987a&at=4800&dist=1.2e13`,
+  'sn1987a-hot-spots-2009': `cosmic=sn1987a&at=8000`,
+  'betelgeuse-supernova': `cosmic=betelgeuse&at=30`,
+  'betelgeuse-supernova-sky': `focus=Earth&t=${T}&dist=400000&cosmic=betelgeuse&at=10&sky=84,-1&fov=60`,
+  'b68-now': `cosmic=b68&at=0`,
+  'b68-from-earth': `focus=Earth&t=${T}&dist=400000&cosmic=b68&at=0&sky=255.659,-23.826&fov=0.2`,
+  'b68-class-0': `cosmic=b68&at=120000&dist=2.4e12`,
+  'b68-outflow-cavity': `cosmic=b68&at=300000&dist=3e11`,
+  'b68-t-tauri': `cosmic=b68&at=2000000&dist=1e11`,
+  'gw150914-inspiral': `cosmic=gw150914&at=-0.3&quality=low`,
+  'gw150914-last-orbits': `cosmic=gw150914&at=-0.015&dist=3000&pitch=0.3&quality=low`,
+  'gw150914-ringdown': `cosmic=gw150914&at=0.004&dist=2500&pitch=0.3&quality=low`,
 };
 const only = process.argv[3]?.split(',');
 

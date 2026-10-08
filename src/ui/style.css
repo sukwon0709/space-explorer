@@ -11,7 +11,7 @@ html, body { margin: 0; height: 100%; background: #000; color: var(--ink); font:
 #focus-name { font-size: 20px; font-weight: 600; }
 #focus-detail { color: var(--quiet); white-space: pre-line; }
 #bodies { position: fixed; top: 16px; right: 16px; display: flex; flex-direction: column; gap: 4px; }
-#bodies button, #layers button, #timebar button, #search, #systems, #missions, #date, #events, #tours, #tour button, #mission button, #mission select { background: var(--panel); color: var(--ink); border: 1px solid rgba(255,255,255,0.12); border-radius: 6px; padding: 5px 10px; font: inherit; cursor: pointer; }
+#bodies button, #layers button, #timebar button, #search, #systems, #missions, #date, #events, #tours, #tour button, #mission button, #mission select, #cosmic button { background: var(--panel); color: var(--ink); border: 1px solid rgba(255,255,255,0.12); border-radius: 6px; padding: 5px 10px; font: inherit; cursor: pointer; }
 #bodies button.focus, #layers button.active, #timebar button.active { border-color: var(--accent); color: var(--accent); }
 #timebar { position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%); display: flex; gap: 4px; align-items: center; padding: 6px; background: var(--panel); border-radius: 8px; max-width: calc(100vw - 32px); overflow-x: auto; }
 #utc { padding: 0 10px; font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -134,3 +134,11 @@ body.walking #view { cursor: grab; }
 #mission .mission-pace.active { border-color: var(--accent); color: var(--accent); }
 .mission-note { margin-top: 6px; font-size: 12px; color: var(--quiet); }
 @media (max-width: 720px) { #mission { left: 8px; right: 8px; width: auto; bottom: 160px; } .mission-summary { display: none; } }
+#cosmic { position: fixed; left: 16px; bottom: 80px; width: min(380px, calc(100vw - 32px)); padding: 8px 12px 10px; background: var(--panel); border-radius: 8px; }
+#cosmic[hidden] { display: none; }
+#cosmic .mission-close { background: none; border: none; color: var(--quiet); font-size: 18px; padding: 0 4px; line-height: 1; }
+#cosmic .cosmic-pace.active { border-color: var(--accent); color: var(--accent); }
+#cosmic button[hidden] { display: none; }
+.cosmic-chart { width: 100%; height: 116px; display: block; }
+.cosmic-time { width: 100%; margin: 6px 0 2px; accent-color: var(--accent); }
+@media (max-width: 720px) { #cosmic { left: 8px; right: 8px; width: auto; bottom: 160px; } #cosmic .mission-summary { display: none; } }

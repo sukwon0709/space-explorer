@@ -55,6 +55,7 @@ uniform vec3 uDustLo;
 uniform vec3 uDustSize;
 uniform float uDustScale;
 uniform float uHideWithin;
+uniform vec4 uHideAt;
 
 varying vec3 vColor;
 varying float vPeak;
@@ -120,7 +121,7 @@ void main() {
   // below saturation they grow instead of only brightening.
   sigma *= min(pow(max(flux * 33.0, 1.0), 0.3), uMaxSigma);
   vDisc = discPx > 0.5 * uSigma * uPixelRatio ? discPx : 0.0;
-  if (peak < uCull || d < uHideWithin) {
+  if (peak < uCull || d < uHideWithin || length(position - uHideAt.xyz) < uHideAt.w) {
     gl_PointSize = 0.0;
     gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
     return;
@@ -217,6 +218,8 @@ export class StarField {
         uDustSize: { value: new THREE.Vector3(...(dust?.size ?? [1, 1, 1])) },
         uDustScale: { value: dust?.scale ?? 0 },
         uHideWithin: { value: 0 },
+        // One star not drawn (one the app draws itself): catalogue position (pc) and radius.
+        uHideAt: { value: new THREE.Vector4(0, 0, 0, 0) },
         ...relativityUniforms,
       },
       vertexShader,
