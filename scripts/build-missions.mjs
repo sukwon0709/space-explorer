@@ -25,7 +25,9 @@ try {
     return f.buffer.slice(f.byteOffset, f.byteOffset + f.byteLength);
   };
   const ephemeris = new Ephemeris(load('de440.bin'));
-  for (const name of ['mars', 'jupiter', 'saturn', 'uranus', 'neptune', 'pluto']) ephemeris.add(load(`moons-${name}.bin`));
+  for (const name of ['mars', 'jupiter', 'saturn', 'uranus', 'neptune', 'pluto', 'visited']) ephemeris.add(load(`moons-${name}.bin`));
+  // Didymos sits off the pair's barycentre, as in the app.
+  ephemeris.setBarycentre(2065803, 120065803, GM[120065803] / (GM[2065803] + GM[120065803]));
   const iso = (tdb) => new Date(Math.round(tdbToUtc(tdb) / 1000) * 1000).toISOString().replace('.000Z', 'Z');
   const round = (x, n) => Math.round(x * 10 ** n) / 10 ** n;
 

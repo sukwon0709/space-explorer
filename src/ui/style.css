@@ -25,8 +25,8 @@ html, body { margin: 0; height: 100%; background: #000; color: var(--ink); font:
 #search, #systems, #missions { width: 150px; margin-bottom: 4px; }
 #search.miss { border-color: #ff7a7a; }
 #date, #events, #tours, #systems, #missions, #mission select { padding: 4px 6px; color-scheme: dark; }
-.label.moon, .label.asteroid { font-size: 12px; opacity: 0.85; }
-.label.moon::before, .label.asteroid::before { width: 5px; height: 5px; }
+.label.moon, .label.asteroid, .label.comet, .label.kbo { font-size: 12px; opacity: 0.85; }
+.label.moon::before, .label.asteroid::before, .label.comet::before, .label.kbo::before { width: 5px; height: 5px; }
 .label.smallbody { color: #9fe3ff; }
 #layers { position: fixed; top: 16px; left: 50%; transform: translateX(-50%); display: flex; gap: 4px; }
 #layers button { font-size: 12px; padding: 4px 9px; }

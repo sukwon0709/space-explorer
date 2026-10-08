@@ -1,4 +1,5 @@
 import type { Vec3 } from './ephemeris';
+import shapes from '../generated/shapes.json';
 
 /** Barycentric ICRF position (km) of a body at a TDB epoch: the app's ephemeris. */
 export type BodyPosition = (id: number, tdb: number, out: Vec3) => Vec3;
@@ -197,3 +198,8 @@ export function approaches(
  * to Earth.
  */
 export const SOI: Record<number, number> = { 199: 1.12e5, 299: 6.16e5, 399: 9.25e5, 301: 6.6e4, 499: 5.77e5, 599: 4.82e7, 699: 5.48e7, 799: 5.18e7, 899: 8.68e7, 999: 3.1e6 };
+
+// The small bodies spacecraft visited pull too weakly for a sphere worth the name; within
+// 20,000 km the trail is still best drawn around them (a mission is relative to one only
+// during its visit, pipeline/fetch_missions.py VISITS).
+for (const e of Object.values(shapes.bodies as Record<string, { id: number }>)) SOI[e.id] = 2e4;

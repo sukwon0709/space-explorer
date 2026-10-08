@@ -8,6 +8,7 @@ import { utcToTdb } from '../core/time';
 
 /** Cassini released Huygens on 25 December 2004 at 02:00 UTC. */
 const HUYGENS_RELEASE = utcToTdb(Date.UTC(2004, 11, 25, 2, 0));
+const IMPACTOR_RELEASE = utcToTdb(Date.UTC(2005, 6, 3, 6, 0));
 
 const DEG = Math.PI / 180;
 /** Most points drawn for one trail. */
@@ -202,6 +203,7 @@ export class MissionView {
     attr.setXYZ(0, rel[0], rel[1], rel[2]);
     attr.needsUpdate = true;
     if (this.mission.model === 'cassini') detach(this.model, 'huygens', tdb < HUYGENS_RELEASE);
+    if (this.mission.model === 'deepimpact') detach(this.model, 'impactor', tdb < IMPACTOR_RELEASE);
 
     // The trail, relative to the camera.
     this.past.visible = this.future.visible = showTrail;

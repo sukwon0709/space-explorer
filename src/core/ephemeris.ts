@@ -26,6 +26,8 @@ const SEGMENT_BYTES = 40;
 
 export class Ephemeris {
   private readonly byTarget = new Map<number, Segment>();
+  /** Bodies stored at their system's barycentre, moved off it by a satellite's pull. */
+  private readonly barycentres = new Map<number, { satellite: number; ratio: number }>();
   readonly start: number;
   readonly end: number;
 
@@ -49,6 +51,15 @@ export class Ephemeris {
       added.push(seg.target);
     }
     return added;
+  }
+
+  /**
+   * `primary`'s segment holds its system's barycentre; `satellite`'s is relative to the
+   * primary. The primary then sits at barycentre - ratio * satellite (ratio = the
+   * satellite's share of the mass), where the satellite's segment covers the epoch.
+   */
+  setBarycentre(primary: number, satellite: number, ratio: number): void {
+    this.barycentres.set(primary, { satellite, ratio });
   }
 
   static async fetch(url: string): Promise<ArrayBuffer> {
@@ -141,6 +152,12 @@ export class Ephemeris {
       out[0] += step[0];
       out[1] += step[1];
       out[2] += step[2];
+      const bary = this.barycentres.get(body);
+      const sat = bary && this.byTarget.get(bary.satellite);
+      if (bary && sat && tdb >= sat.init && tdb <= sat.init + sat.nrec * sat.intlen) {
+        this.segmentPosition(bary.satellite, tdb, step);
+        for (let k = 0; k < 3; k++) out[k] -= bary.ratio * step[k];
+      }
       body = seg.center;
     }
     return out;

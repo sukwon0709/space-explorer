@@ -4,7 +4,36 @@ A real-time 3D simulator for travelling from Earth through the Solar System and 
 
 The full plan, including the roadmap, lives in the [design doc](https://claude.ai/code/artifact/c235450b-21cd-41a8-bc4b-b69ca4239c84).
 
-## Near light speed (this code)
+## Asteroids and comets (this code)
+
+**Land and walk on the 12 small bodies spacecraft have visited, in their real shapes.** Bennu, Ryugu, Itokawa, Eros, comet 67P/Churyumov–Gerasimenko, Arrokoth, Didymos and its moon Dimorphos, Lutetia, Šteins, comet Tempel 1 and Donaldjohanson. Search a name or fly there, press `Walk here` near the ground (`?walk=1`), and ride along with the missions that went to them.
+
+- **Shapes are the mission teams' own models** (`pipeline/build_shapes.py`): laser altimetry, stereophotoclinometry or structure-from-motion meshes from OSIRIS-REx, Hayabusa2, Hayabusa, NEAR, Rosetta, New Horizons, DART, Deep Impact and Lucy, as archived with NAIF, ESA, JAXA and the PDS. Bennu and Ryugu keep a million triangles (edges about 1 and 1.6 m); Itokawa's model resolves 1.8 m. Each is cut into an octree of chunks that stream in as you come close (about 100 MB for all twelve). Neighbouring chunks share their edge vertices exactly, so there are no cracks.
+- **Smaller than the model, computed** (`src/render/shapebody.ts`). Boulders below the model's resolution are scattered by the size-frequency law measured on each body (N(>D) ∝ D^−α), placed on the real ground, and cast shadows. Close up, the ground gets a fine grain of gravel. Light is Lommel–Seeliger, as dark regolith scatters, with the opposition surge. Shadows come from two cascaded shadow maps, so the boulders shade each other.
+- **Gravity of the real shape** (`src/core/shape.ts`): the exact field of a uniform polyhedron (Werner & Scheeres 1997), from each body's mass as the spacecraft measured it (Bennu, Ryugu, Itokawa, Eros, 67P, Lutetia, Didymos and Dimorphos). For Arrokoth, Šteins, Tempel 1 and Donaldjohanson a density is assumed. Uphill and downhill follow the real field, which on Bennu's and Ryugu's equators is almost cancelled by their spin.
+- **Walking in micro-gravity** (`src/core/shapewalk.ts`). Bennu pulls with 73 µm/s² (a 130,000th of Earth's). You walk at the pace that gravity allows (the Froude number again: 3 mm/s on Dimorphos). Time runs faster (√(9.8/g), up to 1000×) so it looks like walking, and T switches to real time. Space is a gentle hop under half the escape speed, which on Bennu lasts tens of minutes. Shift+Space jumps at 3.1 m/s, as on Earth, and leaves most of these bodies for good.
+- **Orbits and spin.** Positions are JPL Horizons small-body solutions, 1960–2060 (`pipeline/build_visited.py`, `public/data/moons-visited.bin`). Rotation is each mission's model. Dimorphos orbits Didymos every 11.92 hours until DART strikes it, and every 11.37 hours after (JPL's solution), keeping one face to it. Didymos sits off the pair's barycentre by their mass ratio.
+- **Spacecraft at the small bodies.** OSIRIS-REx, Rosetta, New Horizons and Lucy now fly relative to the bodies they visited, and four missions are new:
+  - **Hayabusa2**: its 17 months at Ryugu from JAXA's own kernels (`pipeline/hayabusa2.py`). The laser-altimeter trajectory covers the descents to about 100 m. The home-position trajectory, sampled every 10 minutes, covers the rest. The last 100 m of the two touchdowns and the climb back are computed (straight down at the descent's pace onto the shape model, up at 0.5 m/s).
+  - **NEAR Shoemaker** around Eros, to its landing; **Deep Impact** past Tempel 1, with its impactor until release; **DART** into Dimorphos.
+  - **Rosetta past Šteins and Lutetia** from ESA's own kernels (`pipeline/kernel_flybys.py`): 802.6 km from Šteins and 3,168 km from Lutetia, as ESA measured. Horizons's asteroid orbits put Rosetta 580 km from Šteins.
+  - **New Horizons past Arrokoth** uses Horizons's Arrokoth-relative solution near the flyby (3,538 km), blended into the heliocentric one further out.
+- **Gate** (`tests/shapes.test.ts`, `tests/missions.test.ts`):
+  - The polyhedron gravity matches an independent computation to 1e-6 and tends to GM/r² far away.
+  - Bulk densities match the missions' (Bennu and Ryugu 1190, Itokawa 1900, Eros 2670, 67P 533, Didymos 2790 kg/m³) within 6%.
+  - Every orbit matches Horizons over 1960–2060, and Didymos and Dimorphos balance about their barycentre. DART shortens Dimorphos's orbit by 33 minutes (Thomas et al. 2023: 11.921 to 11.372 hours).
+  - On Bennu you stand still for a minute, a gentle hop comes back down, and a full jump escapes.
+  - Missions: held-out positions within 2 m of Horizons near bodies under 1 km across, 10 m near the larger ones, plus 12 checks of Hayabusa2 against JAXA's laser trajectory. The published flyby distances (Šteins, Lutetia, Arrokoth, Tempel 1, Eros, Donaldjohanson) within their tolerances, DART striking Dimorphos's centre at 6.1 km/s, and Hayabusa2 touching Ryugu's surface.
+
+### Limits
+
+- Uniform density: real interiors aren't (Bennu's centre is lighter than its equatorial bulge). The Didymos model's origin is 57 m from its centroid, so its uniform field is centred slightly off.
+- Boulders and grain are statistically right but not the real boulders, except those large enough to be in the model.
+- No comet activity: 67P and Tempel 1 have no jets or coma.
+- Hayabusa2 between laser arcs is the station-keeping trajectory, which agrees with the laser one to a median of a few metres (95% within 30 m, worst 0.3 km). Its approach and departure are Horizons, shifted to meet JAXA's.
+- The missions' moments at the small bodies (arrivals, touchdowns, impacts) are dated by hand.
+
+## Near light speed
 
 **Fly to the stars with a real rocket, and see what Einstein says you would see.** In the ship, press **V** to swap the warp drive (faster than light, a fiction) for a rocket under constant thrust. Pick a destination and press **X**: the ship accelerates at 1 g for half the way, turns around and decelerates for the rest, arriving at rest. The time bar sets how fast time on board runs; a trip plays in about a minute.
 
@@ -31,7 +60,7 @@ The full plan, including the roadmap, lives in the [design doc](https://claude.a
 
 ## Spacecraft journeys
 
-**Ride along with 15 real spacecraft on the paths they actually flew.** Pick one from `Spacecraft…` or search its name: Voyager 1 and 2, Pioneer 10 and 11, Galileo, Cassini, New Horizons, Juno, Rosetta, Parker Solar Probe, OSIRIS-REx, Artemis I and II, JUICE and Lucy. The camera rides next to a model of the craft, the HUD reads out its speed, the gravity on it and the next encounter, and its path is drawn through space: solid where it has been, faint where it is going.
+**Ride along with 19 real spacecraft on the paths they actually flew.** Pick one from `Spacecraft…` or search its name: Voyager 1 and 2, Pioneer 10 and 11, Galileo, Cassini, New Horizons, Juno, Rosetta, Parker Solar Probe, OSIRIS-REx, Artemis I and II, JUICE, Lucy, and (see above) NEAR Shoemaker, Deep Impact, Hayabusa2 and DART. The camera rides next to a model of the craft, the HUD reads out its speed, the gravity on it and the next encounter, and its path is drawn through space: solid where it has been, faint where it is going.
 
 - **Paths are the navigation teams' own reconstructions**, from JPL Horizons (`pipeline/fetch_missions.py`). The table stores position and velocity with a cubic Hermite between rows, placed so the path stays within 0.5 km of Horizons everywhere (rows every 2 seconds near a close pass, weeks apart in cruise). 6.9 MB for all 15.
 - **Each stretch is stored relative to the body it is near.** Horizons' Sun-relative path and its planet-relative path come from different reconstructions. Chained through the Sun, Voyager 2 misses Neptune by 33,400 km instead of the measured 29,240. So inside a planet's (or the Moon's) sphere of influence the table keeps the craft relative to that planet, and the app adds the planet's position from its own DE440. Every flyby is then exactly as close as the navigation team measured.
@@ -414,6 +443,11 @@ python3 pipeline/fetch_missions.py public/data/missions      # or name some: voy
 node scripts/build-missions.mjs
 python3 pipeline/make_mission_fixtures.py
 
+# Asteroids and comets: shape models (about 10 min), their orbits
+python3 pipeline/build_shapes.py $DATA public/data/shapes --fixtures tests/fixtures/shapes-reference.json   # --only bennu,ryugu
+python3 pipeline/build_visited.py $DATA public/data --fixtures tests/fixtures/visited-reference.json
+# (Hayabusa2's kernels download into data/spk; fetch_missions.py --kernels DIR to put them elsewhere)
+
 # Black holes: the S-stars and the EHT images
 python3 pipeline/fetch_blackholes.py $DATA public/data   # VizieR (Gillessen et al. 2017), ESO image archive
 ```
@@ -424,6 +458,8 @@ Tiles are geographic: level L has 2^(L+1) × 2^L tiles of 180/2^L degrees. Colou
 
 - JPL DE440 planetary ephemeris (Park et al. 2021); JPL Horizons for the independent check.
 - JPL Horizons reconstructed and predicted spacecraft trajectories (NASA/JPL navigation teams, ESA for Rosetta and JUICE).
+- Small-body shape models: OSIRIS-REx OLA (Barnouin et al. 2020; Daly et al. 2020), Hayabusa2 ONC (Watanabe et al. 2019), Hayabusa AMICA and NEAR MSI (Gaskell et al. 2008), Rosetta OSIRIS (Preusker et al. 2017; Jorda et al. 2012), New Horizons LORRI (Porter et al. 2024), DART DRACO via Hera (Daly et al. 2023), Deep Impact/Stardust-NExT (Thomas et al. 2013), Lucy L'LORRI; via NAIF, ESA SPICE, JAXA DARTS and the PDS Small Bodies Node.
+- Hayabusa2 proximity trajectories (laser-altimeter derived and home-position keeping), JAXA DARTS Hayabusa2 SPICE archive.
 - NAIF SPICE kernels: Earth orientation (ITRF93) and lunar orientation (MOON_ME, DE440).
 - NASA Blue Marble: Next Generation and Black Marble 2016, MODIS land/water mask, via NASA GIBS.
 - NOAA ETOPO 2022 (60 arc-second); EGM96 geoid (NGA), via the PROJ data CDN.

@@ -5,7 +5,7 @@
  * (scripts/build-missions.mjs). Shapes are drawn from published dimensions, simplified.
  */
 
-export type CraftModel = 'voyager' | 'pioneer' | 'galileo' | 'cassini' | 'newhorizons' | 'juno' | 'rosetta' | 'parker' | 'osirisrex' | 'orion' | 'juice' | 'lucy';
+export type CraftModel = 'voyager' | 'pioneer' | 'galileo' | 'cassini' | 'newhorizons' | 'juno' | 'rosetta' | 'parker' | 'osirisrex' | 'orion' | 'juice' | 'lucy' | 'near' | 'deepimpact' | 'hayabusa2' | 'dart';
 
 export interface Mission {
   slug: string;
@@ -22,6 +22,11 @@ export interface Mission {
    * (km from the centre). Planets are found by their system barycentre's moons file.
    */
   encounters: Array<[number, number]>;
+  /**
+   * Small bodies the mission stays with or passes (their shape models load with it):
+   * the trajectory is relative to them there (pipeline/fetch_missions.py VISITS).
+   */
+  visits?: number[];
   /** Moments the data cannot find by distance alone (UTC, title). */
   extra?: Array<[string, string]>;
   /** Trajectory after this date (UTC) is the team's prediction. */
@@ -74,8 +79,8 @@ export const MISSIONS: Mission[] = [
   {
     slug: 'new-horizons', name: 'New Horizons', naif: -98, model: 'newhorizons', color: '#ff9f9f',
     summary: 'Launched 19 January 2006, the fastest launch ever. Jupiter’s gravity flung it to Pluto in nine and a half years.',
-    encounters: [...planets(599, 999), ...moons(100000, 901)],
-    extra: [['2019-01-01T05:33:00Z', 'Flies 3,500 km past Arrokoth, the farthest object ever visited']],
+    encounters: [...planets(599, 999), ...moons(100000, 901), [2486958, 100000]],
+    visits: [2486958],
   },
   {
     slug: 'juno', name: 'Juno', naif: -61, model: 'juno', color: '#8fe3ff',
@@ -86,7 +91,8 @@ export const MISSIONS: Mission[] = [
   {
     slug: 'rosetta', name: 'Rosetta', naif: -226, model: 'rosetta', color: '#b8f08a',
     summary: 'Launched 2 March 2004. Earth three times and Mars once to catch comet 67P/Churyumov–Gerasimenko, then two years beside it.',
-    encounters: [...planets(399, 499)],
+    encounters: [...planets(399, 499), [2002867, 100000], [2000021, 100000]],
+    visits: [2002867, 2000021, 1000012],
     extra: [['2014-08-06T09:00:00Z', 'Arrives at comet 67P'], ['2014-11-12T15:34:00Z', 'Philae lands on the comet'], ['2016-09-30T10:39:00Z', 'Rosetta touches down on the comet']],
   },
   {
@@ -99,7 +105,8 @@ export const MISSIONS: Mission[] = [
     slug: 'osiris-rex', name: 'OSIRIS-REx', naif: -64, model: 'osirisrex', color: '#a0b4ff',
     summary: 'Launched 8 September 2016. To asteroid Bennu for a sample, back to Earth in 2023, and on to Apophis as OSIRIS-APEX.',
     encounters: [...planets(399)],
-    extra: [['2018-12-03T17:00:00Z', 'Arrives at asteroid Bennu'], ['2020-10-20T22:08:00Z', 'Touches Bennu and collects its sample'], ['2023-09-24T14:52:00Z', 'The sample capsule lands in Utah']],
+    visits: [2101955],
+    extra: [['2018-12-03T17:00:00Z', 'Arrives at asteroid Bennu'], ['2020-10-20T22:08:00Z', 'Touches Bennu and collects its sample'], ['2021-05-10T20:23:00Z', 'Leaves Bennu for Earth'], ['2023-09-24T14:52:00Z', 'The sample capsule lands in Utah']],
     predictedAfter: '2025-09-08T00:00:00Z',
   },
   {
@@ -121,8 +128,37 @@ export const MISSIONS: Mission[] = [
   {
     slug: 'lucy', name: 'Lucy', naif: -49, model: 'lucy', color: '#ffe0a0',
     summary: 'Launched 16 October 2021. Earth flybys send it to the Trojan asteroids that share Jupiter’s orbit.',
-    encounters: [...planets(399)],
-    extra: [['2023-11-01T16:54:00Z', 'Flies past asteroid Dinkinesh and finds its moon Selam'], ['2025-04-20T17:51:00Z', 'Flies past asteroid Donaldjohanson']],
+    encounters: [...planets(399), [20052246, 100000]],
+    visits: [20052246],
+    extra: [['2023-11-01T16:54:00Z', 'Flies past asteroid Dinkinesh and finds its moon Selam']],
     predictedAfter: '2025-09-08T00:00:00Z',
+  },
+  {
+    slug: 'near-shoemaker', name: 'NEAR Shoemaker', naif: -93, model: 'near', color: '#ffc4e0',
+    summary: 'Launched 17 February 1996. Past asteroid Mathilde to Eros: the first spacecraft to orbit an asteroid, and to land on one.',
+    encounters: [...planets(399)],
+    visits: [2000433],
+    extra: [['1998-12-23T18:41:00Z', 'An engine burn fails; NEAR flies 3,830 km past Eros instead of stopping'], ['2000-02-14T15:33:00Z', 'Enters orbit around Eros, a year late'], ['2001-02-12T19:44:00Z', 'Touches down on Eros at 1.6 m/s, the first landing on an asteroid']],
+  },
+  {
+    slug: 'deep-impact', name: 'Deep Impact', naif: -140, model: 'deepimpact', color: '#ffb0a0',
+    summary: 'Launched 12 January 2005. Fired a 370 kg impactor into comet Tempel 1 and watched the crater-forming blast from 500 km.',
+    encounters: [[1000093, 100000]],
+    visits: [1000093],
+    extra: [['2005-07-03T06:00:00Z', 'Releases the impactor toward Tempel 1'], ['2005-07-04T05:44:58Z', 'The impactor strikes Tempel 1 at 10.3 km/s']],
+  },
+  {
+    slug: 'hayabusa2', name: 'Hayabusa2', naif: -37, model: 'hayabusa2', color: '#a8ffd8',
+    summary: 'Launched 3 December 2014. A year and a half at asteroid Ryugu: rovers, a crater it made itself, two touchdowns for samples, home in 2020.',
+    encounters: [...planets(399)],
+    visits: [2162173],
+    extra: [['2018-06-27T00:35:00Z', 'Arrives at Ryugu, 20 km above it'], ['2018-09-21T04:06:00Z', 'Drops the MINERVA-II1 rovers, the first to hop on an asteroid'], ['2018-10-03T01:57:00Z', 'Releases the MASCOT lander'], ['2019-02-21T22:29:00Z', 'First touchdown: a bullet fired into the ground, sample collected'], ['2019-04-05T02:06:00Z', 'Fires a 2 kg copper projectile into Ryugu to dig a crater'], ['2019-07-11T01:06:00Z', 'Second touchdown, beside the new crater'], ['2019-11-13T01:05:00Z', 'Leaves Ryugu for Earth'], ['2020-12-05T17:30:00Z', 'The sample capsule lands in Woomera, Australia']],
+  },
+  {
+    slug: 'dart', name: 'DART', naif: -135, model: 'dart', color: '#ffdf70',
+    summary: 'Launched 24 November 2021. Steered itself into Dimorphos, the moon of asteroid Didymos, to see if an impact could move an asteroid.',
+    encounters: [],
+    visits: [120065803, 2065803],
+    extra: [['2022-09-11T23:14:00Z', 'Releases LICIACube to film the impact'], ['2022-09-26T23:14:24Z', 'Strikes Dimorphos at 6.1 km/s, shortening its orbit by 33 minutes']],
   },
 ];

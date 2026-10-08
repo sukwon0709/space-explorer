@@ -2,12 +2,15 @@ import type { WalkInput } from '../core/walker';
 
 /**
  * Controls on foot: W/S/A/D to walk, Shift to run, Space to jump, drag or the arrow
- * keys to look around, B to board the ship when it is near, Esc to stop walking. On
- * touch screens, buttons for walking, running and jumping, and drag to look.
+ * keys to look around, B to board the ship when it is near, T to switch to real time on
+ * a small body, Esc to stop walking. On touch screens, buttons for walking, running and
+ * jumping, and drag to look.
  */
 export interface WalkActions {
   board(): void;
   exit(): void;
+  /** On a small body: switch between sped-up and real time. */
+  time(): void;
 }
 
 const MOVE_KEYS: Record<string, [number, number]> = {
@@ -40,7 +43,7 @@ export class WalkControls {
         return;
       }
       if (e.repeat) return;
-      const action = { KeyB: actions.board, Escape: actions.exit }[e.code];
+      const action = { KeyB: actions.board, Escape: actions.exit, KeyT: actions.time }[e.code];
       if (action) {
         action();
         e.preventDefault();
