@@ -3,6 +3,7 @@ import type { Vec3 } from '../core/ephemeris';
 import { icrfToScene } from '../core/frames';
 import { integrateRay, type GalaxyModelSpec, type ModelAxes } from '../core/galaxymodel';
 import { sampleGalaxyStars, type DiscMaps } from '../core/galaxystars';
+import { RELATIVITY_GLSL, relativityUniforms } from './relativity';
 
 /** Where a model is and how bright, worked out by the caller (DeepSky). */
 export interface ModelPlacement {
@@ -32,12 +33,16 @@ uniform vec3 uHalf;
 uniform float uShrink;
 uniform mat3 uIcrfToScene;
 varying vec3 vLocal;
+varying float vD;
+${RELATIVITY_GLSL}
 void main() {
   vLocal = position * uHalf;
   // Model frame (kpc) to camera-relative ICRS (Mpc), shrunk toward the camera (the
   // picture is unchanged) to stay inside the projection's range.
   vec3 rel = uRel + (uX * vLocal.x + uY * vLocal.y + uZ * vLocal.z) * 1e-3;
-  gl_Position = projectionMatrix * modelViewMatrix * vec4(uIcrfToScene * (rel * uShrink), 1.0);
+  vec4 mv = modelViewMatrix * vec4(uIcrfToScene * (rel * uShrink), 1.0);
+  vD = dopplerRest(normalize(mv.xyz));
+  gl_Position = projectionMatrix * relativistic(mv);
   gl_Position.z = gl_Position.w * 0.999999;
 }
 `;
@@ -70,6 +75,8 @@ uniform float uDetailScale;
 uniform float uTone;
 ${STRETCH}
 varying vec3 vLocal;
+varying float vD;
+${RELATIVITY_GLSL}
 
 float sech2(float x) {
   float e = exp(-2.0 * min(abs(x), 30.0));
@@ -184,7 +191,8 @@ void main() {
   }
   // A photograph's response: linear when faint, rolling off instead of clipping, with a
   // longer exposure once the galaxy fills the view (as its pictures are taken).
-  vec3 c = 1.0 - exp(-stretch(light * uScale * uGain, uTone));
+  // From a ship near light speed: shifted as a 5,500 K blackbody's light would be.
+  vec3 c = 1.0 - exp(-stretch(light * uScale * uGain * dopplerTint(vD, 5500.0), uTone));
   if (max(c.r, max(c.g, c.b)) < 1.0 / 2048.0) discard;
   gl_FragColor = vec4(mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c)), 1.0);
 }
@@ -219,6 +227,7 @@ varying vec3 vColour;
 varying float vPeak;
 varying float vSigma;
 varying float vSize;
+${RELATIVITY_GLSL}
 
 void main() {
   vec3 toCam = uCam - position;
@@ -261,9 +270,11 @@ void main() {
     return;
   }
   vec3 rel = uRel + (uX * position.x + uY * position.y + uZ * position.z) * 1e-3;
-  gl_Position = projectionMatrix * modelViewMatrix * vec4(uIcrfToScene * (rel * uShrink), 1.0);
+  vec4 mv = modelViewMatrix * vec4(uIcrfToScene * (rel * uShrink), 1.0);
+  float D = dopplerRest(normalize(mv.xyz));
+  gl_Position = projectionMatrix * relativistic(mv);
   gl_Position.z = gl_Position.w * 0.999999;
-  vColour = colour;
+  vColour = colour * dopplerTint(D, 5500.0) / (D * D);
   vPeak = peak;
   vSigma = sigma;
   vSize = min(2.0 * ceil(3.0 * sigma) + 1.0, 511.0);
@@ -360,6 +371,7 @@ export class GalaxyModelLayer {
       uDetail: { value: spec.kind === 'disc' && spec.file ? 1 : 0 },
       // The finest detail the image holds: two of its coarser texels.
       uDetailScale: { value: (4 * spec.R) / Math.max(1, Math.min(...(spec.size ?? [1, 1]))) },
+      ...relativityUniforms,
     };
     const material = new THREE.ShaderMaterial({
       uniforms, vertexShader, fragmentShader,
@@ -475,6 +487,7 @@ export class GalaxyModelLayer {
       uNear: { value: (2 * spec.R) / Math.sqrt(stars.count) },
       uTone: u.uTone,
       uDust: u.uDust, uDisc: u.uDisc, uR: { value: spec.R }, uTauMax: u.uTauMax, uTau0: u.uTau0, uHd: u.uHd, uDh: u.uDh, uZd: u.uZd,
+      ...relativityUniforms,
     };
     const material = new THREE.ShaderMaterial({
       uniforms: su, vertexShader: starVertex, fragmentShader: starFragment,

@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { Vec3 } from '../core/ephemeris';
 import { icrfToScene } from '../core/frames';
 import { KMS_TO_PCYR, REDDENING, decodeBlock, type StarBlock, type StarIndex } from '../core/stars';
+import { RELATIVITY_GLSL, relativityUniforms } from './relativity';
 
 /** Radius of the Sun in parsecs. */
 const SUN_RADIUS_PC = 695700 / 3.0856775814913673e13;
@@ -62,6 +63,7 @@ varying float vDisc;
 varying float vSize;
 
 ${STAR_GLSL}
+${RELATIVITY_GLSL}
 
 // A_V along the line of sight through the 3D dust grid (Galactic axes, heliocentric).
 float dustBetween(vec3 cam, vec3 rel) {
@@ -88,22 +90,27 @@ void main() {
   // remainder, so the subtraction stays exact for stars near the camera.
   vec3 rel = (position - uCamHigh) + (velocity * (uYears * ${KMS_TO_PCYR.toExponential(10)}) - uCamLow);
   float d = length(rel);
+  vec3 dir = uIcrfToScene * (rel / d);
+  vec4 view = modelViewMatrix * vec4(dir, 0.0);
+  // Seen from a ship moving near light speed (core/relativity.ts): Doppler factor D.
+  float D = dopplerRest(normalize(view.xyz));
+  float teff = uTeff.x * exp(teffCode * uTeff.y);
   float m = absMag * 0.001 + 5.0 * log2(d * 0.1) * 0.30102999566;
   // 10^(-0.4 (m - uMsat)): 1 is a star whose peak just reaches full brightness.
   float flux = exp2(-1.3287712 * (m - uMsat)) * uBrightness;
+  // A blackbody point shifted by D: as hot as D T, its disc D times smaller.
+  if (uGamma > 1.0) flux *= surfaceGainV(D, teff) / (D * D);
   float av = avCode * uAvStep;
   if (uDustBlend > 0.0 && flux > uCull) av = mix(av, dustBetween(uCamHigh + uCamLow, rel), uDustBlend);
   flux *= exp2(-1.3287712 * av);
-  vec3 color = kelvinToRgb(uTeff.x * exp(teffCode * uTeff.y)) * exp2(-1.3287712 * av * (vec3(${REDDENING.join(', ')}) - 1.0));
+  vec3 color = kelvinToRgb(teff * D) * exp2(-1.3287712 * av * (vec3(${REDDENING.join(', ')}) - 1.0));
   // Normalised so a star's luminance carries its V flux.
   color /= dot(color, vec3(0.2126, 0.7152, 0.0722));
 
-  float teff = uTeff.x * exp(teffCode * uTeff.y);
   float lum = exp2(-1.3287712 * (absMag * 0.001 + bolometricCorrection(teff) - 4.74));
-  float discPx = sqrt(lum) * (5772.0 / teff) * (5772.0 / teff) * ${SUN_RADIUS_PC.toExponential(8)} / d * uPixelsPerRadian * uPixelRatio;
+  float discPx = sqrt(lum) * (5772.0 / teff) * (5772.0 / teff) * ${SUN_RADIUS_PC.toExponential(8)} / d * uPixelsPerRadian * uPixelRatio / D;
 
-  vec3 dir = uIcrfToScene * (rel / d);
-  vec4 view = modelViewMatrix * vec4(dir, 0.0);
+  view.xyz = aberrateDir(normalize(view.xyz));
   gl_Position = projectionMatrix * vec4(view.xyz, 1.0);
   gl_Position.z = gl_Position.w * 0.999999; // far plane
 
@@ -210,6 +217,7 @@ export class StarField {
         uDustSize: { value: new THREE.Vector3(...(dust?.size ?? [1, 1, 1])) },
         uDustScale: { value: dust?.scale ?? 0 },
         uHideWithin: { value: 0 },
+        ...relativityUniforms,
       },
       vertexShader,
       fragmentShader,

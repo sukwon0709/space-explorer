@@ -2,6 +2,9 @@ import * as THREE from 'three';
 import type { Vec3 } from '../core/ephemeris';
 import { sceneToIcrf } from '../core/frames';
 import { ICRS_TO_GAL } from '../core/milkyway';
+import { T_CMB, V_BAND_K } from '../core/relativity';
+import { RELATIVITY_GLSL, relativityUniforms } from './relativity';
+import { STAR_GLSL } from './stars';
 
 const vertexShader = /* glsl */ `
 varying vec2 vNdc;
@@ -20,6 +23,16 @@ uniform vec2 uTan;
 uniform vec3 uCam;
 uniform float uRadius;
 uniform float uOpacity;
+// Display value of the Sun's surface brightness in V, for the background's real light.
+uniform float uLight;
+// The background squeezed into a point ahead (when its patch is under a pixel): peak
+// value, blur (device pixels), colour temperature, and device pixels per radian.
+uniform float uPoint;
+uniform float uPointSigma;
+uniform float uPointT;
+uniform float uPpr;
+${STAR_GLSL}
+${RELATIVITY_GLSL}
 
 // False colour for the temperature difference t (-1 cold to +1 hot, i.e. +-500 uK), after
 // the Planck team's maps: deep blue through pale cream to red. sRGB.
@@ -34,15 +47,29 @@ vec3 palette(float t) {
 }
 
 void main() {
-  vec3 dir = normalize(uRay * vec3(vNdc * uTan, -1.0));
+  // From a ship near light speed: aberration and Doppler shift (core/relativity.ts).
+  vec3 ray = normalize(vec3(vNdc * uTan, -1.0));
+  vec3 seen = restDir(ray);
+  float D = dopplerRest(seen);
+  vec3 dir = normalize(uRay * seen);
   // The last-scattering surface as the sphere we see it on, centred on the Sun: from
   // elsewhere the ray meets that same shell (from outside, its near side, as a globe).
+  vec3 point = vec3(0.0);
+  if (uPoint > 0.0) {
+    float off = length(cross(ray, normalize(uBetaView))) * uPpr;
+    vec3 lin = kelvinToRgb(min(uPointT, 40000.0));
+    lin = min(lin / dot(lin, vec3(0.2126, 0.7152, 0.0722)) * uPoint * exp(-0.5 * off * off / (uPointSigma * uPointSigma)), 1.0);
+    if (dot(ray, uBetaView) > 0.0) point = mix(lin * 12.92, 1.055 * pow(lin, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, lin));
+  }
   float b = dot(uCam, dir);
   float c = dot(uCam, uCam) - uRadius * uRadius;
   float disc = b * b - c;
-  if (disc < 0.0) discard;
-  float t = c > 0.0 ? -b - sqrt(disc) : -b + sqrt(disc);
-  if (t < 0.0) discard;
+  float t = c > 0.0 ? -b - sqrt(max(disc, 0.0)) : -b + sqrt(max(disc, 0.0));
+  if (disc < 0.0 || t < 0.0) {
+    if (max(point.r, max(point.g, point.b)) <= 0.0) discard;
+    gl_FragColor = vec4(point, 1.0);
+    return;
+  }
   vec3 p = normalize(uCam + dir * t);
   float l = atan(p.y, p.x);
   float lat = asin(clamp(p.z, -1.0, 1.0));
@@ -54,7 +81,19 @@ void main() {
   vec2 dx2 = dFdx(uvSeam), dy2 = dFdy(uvSeam);
   if (abs(dx2.x) + abs(dy2.x) < abs(dx.x) + abs(dy.x)) { dx.x = dx2.x; dy.x = dy2.x; }
   float v = textureGrad(uMap, uv, dx, dy).r * 2.0 - 1.0;
-  gl_FragColor = vec4(palette(v) * uOpacity, 1.0);
+  // The temperature this way, with the map's +-500 uK, Doppler shifted: the false colour
+  // shows the difference from ${T_CMB} K (the motion's dipole swamps the map's ripples).
+  float temp = (${T_CMB} + v * 5e-4) * D;
+  vec3 col = palette(clamp((temp - ${T_CMB}) / 5e-4, -1.0, 1.0)) * uOpacity;
+  // Its real light, a blackbody at that temperature: invisible until D is in the hundreds.
+  if (uLight > 0.0 && temp > 300.0) {
+    float x = ${V_BAND_K.toFixed(1)};
+    float gain = min(exp(min(log(uLight) + logExpm1(x / 5772.0) - logExpm1(x / temp), 30.0)), 1e6);
+    vec3 lin = kelvinToRgb(temp);
+    lin = min(lin / dot(lin, vec3(0.2126, 0.7152, 0.0722)) * gain, 1.0);
+    col += mix(lin * 12.92, 1.055 * pow(lin, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, lin));
+  }
+  gl_FragColor = vec4(col + point, 1.0);
 }
 `;
 
@@ -83,6 +122,12 @@ export class CmbLayer {
         uCam: { value: new THREE.Vector3() },
         uRadius: { value: radiusMpc },
         uOpacity: { value: 0 },
+        uLight: { value: 0 },
+        uPoint: { value: 0 },
+        uPointSigma: { value: 1 },
+        uPointT: { value: 3 },
+        uPpr: { value: 1 },
+        ...relativityUniforms,
       },
       vertexShader,
       fragmentShader,
@@ -100,12 +145,23 @@ export class CmbLayer {
 
   /**
    * @param cameraMpc barycentric ICRS camera position, Mpc.
-   * @param opacity 0 hides the layer.
+   * @param opacity of the false-colour map; 0 hides it.
+   * @param light display value of the Sun's surface brightness in V: the background's
+   *   own light, which only shows from a ship fast enough to blueshift it into view.
+   * @param point the same light squeezed into a point ahead, once its patch is smaller
+   *   than a pixel: peak value, blur and pixels per radian (device pixels).
    */
-  update(camera: THREE.PerspectiveCamera, cameraMpc: Vec3, opacity: number): void {
-    this.mesh.visible = opacity > 0.002;
+  update(camera: THREE.PerspectiveCamera, cameraMpc: Vec3, opacity: number, light = 0, point?: { peak: number; sigma: number; ppr: number }): void {
+    const gamma = relativityUniforms.uGamma.value;
+    const shifted = gamma > 50;
+    this.mesh.visible = opacity > 0.002 || (shifted && light > 0);
     if (!this.mesh.visible) return;
     const u = this.material.uniforms;
+    u.uLight.value = shifted ? light : 0;
+    u.uPoint.value = shifted && point ? point.peak : 0;
+    u.uPointSigma.value = point?.sigma ?? 1;
+    u.uPointT.value = 2 * gamma * T_CMB;
+    u.uPpr.value = point?.ppr ?? 1;
     const g = toGalactic(cameraMpc);
     u.uCam.value.set(g[0], g[1], g[2]);
     u.uOpacity.value = opacity;

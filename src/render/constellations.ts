@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { Vec3 } from '../core/ephemeris';
 import { KMS_TO_PCYR } from '../core/stars';
+import { RELATIVITY_GLSL, relativityUniforms } from './relativity';
 
 /** Stellarium's modern constellation figures, with each figure star's catalogue position. */
 export interface ConstellationData {
@@ -15,9 +16,11 @@ uniform vec3 uCamHigh;
 uniform vec3 uCamLow;
 uniform float uYears;
 uniform mat3 uIcrfToScene;
+${RELATIVITY_GLSL}
 void main() {
   vec3 rel = (position - uCamHigh) + (velocity * (uYears * ${KMS_TO_PCYR.toExponential(10)}) - uCamLow);
   vec4 view = modelViewMatrix * vec4(uIcrfToScene * normalize(rel), 0.0);
+  view.xyz = aberrateDir(normalize(view.xyz));
   gl_Position = projectionMatrix * vec4(view.xyz, 1.0);
   gl_Position.z = gl_Position.w * 0.999998;
 }
@@ -63,6 +66,7 @@ export class Constellations {
         uYears: starUniforms.uYears,
         uIcrfToScene: starUniforms.uIcrfToScene,
         uOpacity: { value: 0.6 },
+        ...relativityUniforms,
       },
       vertexShader,
       fragmentShader,

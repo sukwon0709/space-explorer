@@ -133,6 +133,15 @@ const views = {
   'titan-huygens': `focus=Titan&t=2026-10-08T00:00:00Z&lat=-10.573&lon=167.665&dist=0.05&heading=90&tilt=6&walk=1`,
   'titan-dunes': `focus=Titan&t=2026-10-10T00:00:00Z&lat=-5.5&lon=105&dist=0.05&heading=0&tilt=6&walk=1`,
   'titan-ligeia': `focus=Titan&t=2026-10-11T12:00:00Z&lat=76.85&lon=112&dist=0.05&heading=0&tilt=4&walk=1`,
+  // Near light speed (?drive=rocket): a 1 g trip, this far through it (time on board).
+  'rocket-start': `fly=1&drive=rocket&target=Proxima%20Centauri&trip=0&rate=0&fov=100&t=${T}`,
+  'rocket-proxima-half': `fly=1&drive=rocket&target=Proxima%20Centauri&trip=0.5&rate=0&fov=100&t=${T}`,
+  'rocket-proxima-back': `fly=1&drive=rocket&target=Proxima%20Centauri&trip=0.5&rate=0&fov=100&look=180&t=${T}`,
+  'rocket-andromeda': `fly=1&drive=rocket&target=Andromeda%20Galaxy&trip=0.5&rate=0&fov=100&t=${T}`,
+  'rocket-andromeda-10': `fly=1&drive=rocket&target=Andromeda%20Galaxy&trip=0.1&rate=0&fov=100&t=${T}`,
+  'rocket-andromeda-13': `fly=1&drive=rocket&target=Andromeda%20Galaxy&trip=0.13&rate=0&fov=100&t=${T}`,
+  'rocket-andromeda-22': `fly=1&drive=rocket&target=Andromeda%20Galaxy&trip=0.22&rate=0&fov=100&t=${T}`,
+  'rocket-andromeda-30': `fly=1&drive=rocket&target=Andromeda%20Galaxy&trip=0.3&rate=0&fov=100&t=${T}`,
   // Star systems: stars up close, binary companions, exoplanets (looks estimated).
   'sirius-system': `focus=Sirius&t=${T}&dist=1.5e10&pitch=1.2`,
   'sirius-b': `focus=Sirius%20B&t=${T}&dist=40000`,

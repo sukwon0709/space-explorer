@@ -4,7 +4,32 @@ A real-time 3D simulator for travelling from Earth through the Solar System and 
 
 The full plan, including the roadmap, lives in the [design doc](https://claude.ai/code/artifact/c235450b-21cd-41a8-bc4b-b69ca4239c84).
 
-## Spacecraft journeys (this code)
+## Near light speed (this code)
+
+**Fly to the stars with a real rocket, and see what Einstein says you would see.** In the ship, press **V** to swap the warp drive (faster than light, a fiction) for a rocket under constant thrust. Pick a destination and press **X**: the ship accelerates at 1 g for half the way, turns around and decelerates for the rest, arriving at rest. The time bar sets how fast time on board runs; a trip plays in about a minute.
+
+- **Time** (`src/core/relativity.ts`). The trip is exact hyperbolic motion: to Proxima Centauri at 1 g takes 3.54 years on board and 5.87 years on Earth, top speed 0.950 c. To Andromeda it takes 28.5 years on board, while 2.3 million years pass on Earth (top γ 1.2 million). The HUD shows both clocks and Earth's date when you arrive. The app's planets stop at the end of their ephemeris (2060), and the HUD says so. Free flight (W and S, no destination) integrates the proper velocity under the engines' thrust, so you can never reach c.
+- **What you see** is the Lorentz transformation of the light arriving at the ship, computed in every sky shader (stars, galaxies, the Milky Way's glow, nebula pictures, galaxy 3D models, the microwave background) and for the labels:
+  - aberration: everything crowds toward the direction of travel; at 0.95 c the whole Milky Way fits in the view ahead.
+  - Doppler shift: light ahead is blueshifted by D = γ(1 + β cos θ), behind redshifted. A star of temperature T looks like a blackbody at D·T, with its disc D times smaller. Its V-band flux is computed from Planck's law, so stars brighten a little ahead, then fade as their light moves into the ultraviolet (the "starbow"). Behind, they redden and vanish.
+  - The Milky Way's glow, galaxies and nebula pictures are shifted as blackbodies of their colour temperature (an approximation: their real spectra have lines and edges).
+  - The microwave background is a true blackbody: at γ around 300 the 2.7 K glow ahead becomes visible light. At γ of a million it is millions of kelvin, squeezed into a patch a microradian across, and drawn as one point brighter than the full Moon (its integrated flux).
+  - The eye adapts partly to the brighter sky ahead (the square root of the Milky Way's gain).
+- **Gate** (`tests/relativity.test.ts`):
+  - Aberration of a source abeam (cos θ′ = β), head-on Doppler √((1+β)/(1−β)) and the transverse redshift 1/γ.
+  - The microwave background's dipole from the Sun's 369.82 km/s: 3,362 μK, as Planck measured.
+  - Baez's relativistic-rocket table at 1 g: 0.56 ly, 1.19 years and 0.77 c after one year on board; 3.6, 6.6, 20 and 28 years on board to 4.3 ly, 27 ly, 30,000 ly and 2 million ly.
+  - Free-flight integration against the exact hyperbolic motion, and the starbow's fading.
+- `scripts/rocket-check.mjs` flies from Earth to Proxima Centauri in headless Chromium. New URL parameters: `?fly=1&drive=rocket&target=Proxima%20Centauri&trip=0.5` starts halfway through the trip (by time on board).
+
+### Limits
+
+- Only the sky is transformed. Planets, star discs up close, the Sun's globe and spacecraft are drawn as at rest. On a trip they are near only at its ends, where the ship is slow (0.03 c at 30 AU).
+- The rocket ignores gravity, and its fuel: a 1 g trip to Proxima would take a photon rocket (the best possible) about 40 times its own mass in fuel, and to Andromeda about 6 trillion times. Warp-drive flight is unchanged.
+- Light-travel delay isn't modelled: the sky is drawn where things are now, not where they were when the light left.
+- Stars' spectra are blackbodies (no absorption lines), so the colours of strongly shifted stars are approximate.
+
+## Spacecraft journeys
 
 **Ride along with 15 real spacecraft on the paths they actually flew.** Pick one from `Spacecraft…` or search its name: Voyager 1 and 2, Pioneer 10 and 11, Galileo, Cassini, New Horizons, Juno, Rosetta, Parker Solar Probe, OSIRIS-REx, Artemis I and II, JUICE and Lucy. The camera rides next to a model of the craft, the HUD reads out its speed, the gravity on it and the next encounter, and its path is drawn through space: solid where it has been, faint where it is going.
 

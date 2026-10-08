@@ -66,6 +66,15 @@ export class Clock {
     if (!this.paused) this.tdb = this.clamp(this.tdb + realSeconds * this.rate);
   }
 
+  /** Set the time directly, held inside the clock's range (without pausing at its ends). */
+  hold(tdb: number): void {
+    this.tdb = Math.min(this.max, Math.max(this.min, tdb));
+  }
+
+  get maxTdb(): number {
+    return this.max;
+  }
+
   setUtc(unixMs: number): void {
     this.tdb = this.clamp(utcToTdb(unixMs));
   }

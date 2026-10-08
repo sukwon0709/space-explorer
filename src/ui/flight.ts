@@ -11,6 +11,8 @@ export interface FlightActions {
   align(): void;
   jump(): void;
   stepOut(): void;
+  /** Switch between the warp drive and the relativistic rocket. */
+  drive(): void;
   exit(): void;
 }
 
@@ -46,7 +48,7 @@ export class FlightControls {
         return;
       }
       if (e.repeat) return;
-      const action = { KeyX: actions.warp, KeyZ: actions.assist, KeyT: actions.align, KeyG: actions.jump, KeyO: actions.stepOut, Escape: actions.exit }[e.code];
+      const action = { KeyX: actions.warp, KeyZ: actions.assist, KeyT: actions.align, KeyG: actions.jump, KeyO: actions.stepOut, KeyV: actions.drive, Escape: actions.exit }[e.code];
       if (action) {
         action();
         e.preventDefault();
@@ -79,7 +81,7 @@ export class FlightControls {
     left.append(hold('Thrust', 'KeyW', 'Forward thrust (W)'), hold('Reverse', 'KeyS', 'Reverse thrust (S)'), hold('⟲', 'KeyQ', 'Roll left (Q)'), hold('⟳', 'KeyE', 'Roll right (E)'));
     const right = document.createElement('div');
     right.className = 'pad-group';
-    right.append(tap('Go', actions.warp, 'Fly to the destination, or warp ahead; again to stop (X)'), tap('Assist', actions.assist, 'Flight assist on or off (Z)'), tap('Aim', actions.align, 'Turn toward the target (T)'), tap('Jump', actions.jump, 'Jump to the target (G)'), tap('Out', actions.stepOut, 'Step outside, once landed (O)'));
+    right.append(tap('Go', actions.warp, 'Fly to the destination, or warp ahead; again to stop (X)'), tap('Assist', actions.assist, 'Flight assist on or off (Z)'), tap('Aim', actions.align, 'Turn toward the target (T)'), tap('Jump', actions.jump, 'Jump to the target (G)'), tap('Out', actions.stepOut, 'Step outside, once landed (O)'), tap('Drive', actions.drive, 'Warp drive or relativistic rocket (V)'));
     this.pad.append(left, right);
     document.body.append(this.pad);
   }
@@ -160,6 +162,7 @@ export class FlightHud {
       '<b>X</b> with no destination: warp straight ahead · <b>W / S</b> faster and slower while warping · <b>X</b> again stops',
       '<b>W / S</b> thrust forward and back · <b>A / D</b> sideways · <b>R / F</b> up and down · <b>Shift</b> ×30 thrust',
       '<b>Drag</b> or <b>arrows</b> to turn · <b>Q / E</b> roll · <b>Wheel</b> engine power · <b>T</b> turn toward the destination',
+      '<b>V</b> switches to the rocket: real physics near light speed (1 g, time on board runs slow, the sky shifts); the time bar sets time on board',
       'Once landed on a solid surface, <b>O</b> steps outside',
       '<b>Z</b> flight assist (holds still when you let go) · <b>Esc</b> leaves the ship',
     ].join('<br>');

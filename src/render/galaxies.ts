@@ -3,6 +3,7 @@ import type { Vec3 } from '../core/ephemeris';
 import { icrfToScene } from '../core/frames';
 import { REDDENING } from '../core/stars';
 import { FLAG_IMAGE, FLAG_SPHEROID, type GalaxyBlock } from '../core/galaxies';
+import { RELATIVITY_GLSL, relativityUniforms } from './relativity';
 
 /**
  * Shared GLSL: a galaxy's apparent brightness, colour and orientation from the packed
@@ -26,6 +27,7 @@ uniform float uPixelRatio;
 uniform float uBrightness;
 uniform float uExtBlend;
 varying vec3 vColor;
+${RELATIVITY_GLSL}
 
 vec3 kelvinToRgb(float kelvin) {
   float t = clamp(kelvin, 1000.0, 40000.0) / 100.0;
@@ -39,16 +41,19 @@ vec3 kelvinToRgb(float kelvin) {
 // Camera-relative position (Mpc), with the camera split in two float32 parts.
 vec3 relative() { return (position - uCamHigh) - uCamLow; }
 
-// Peak brightness of the galaxy as a point (1 saturates), and its colour.
-float galaxyFlux(float d, out vec3 color) {
+// Peak brightness of the galaxy as a point (1 saturates), and its colour. Seen from a
+// ship moving near light speed (Doppler factor D), its light is that of a blackbody at
+// D times its colour temperature: this is the gain in surface brightness (a point also
+// shrinks by D in each direction, which the caller applies).
+float galaxyFlux(float d, float D, out vec3 color) {
   float av = 3.1 * ebv * 0.01 * uExtBlend;
   float m = (absMag * 0.1 - 26.0) + 5.0 * log2(d * 1e5) * 0.30102999566 + av;
   float bv = colour / 200.0;
   // Ballesteros (2012): B-V to a blackbody temperature.
   float teff = 4600.0 * (1.0 / (0.92 * bv + 1.7) + 1.0 / (0.92 * bv + 0.62));
-  vec3 c = kelvinToRgb(teff) * exp2(-1.3287712 * av * (vec3(${REDDENING.join(', ')}) - 1.0));
+  vec3 c = kelvinToRgb(teff * D) * exp2(-1.3287712 * av * (vec3(${REDDENING.join(', ')}) - 1.0));
   color = c / dot(c, vec3(0.2126, 0.7152, 0.0722));
-  return exp2(-1.3287712 * (m - uMsat)) * uBrightness;
+  return exp2(-1.3287712 * (m - uMsat)) * uBrightness * surfaceGainV(D, teff);
 }
 
 // Scale radius (Mpc) and its size on screen in device pixels.
@@ -70,9 +75,11 @@ varying float vSize;
 void main() {
   vec3 rel = relative();
   float d = length(rel);
+  vec4 view = modelViewMatrix * vec4(uIcrfToScene * (rel / max(d, 1e-30)), 0.0);
+  float D = dopplerRest(normalize(view.xyz));
   vec3 color;
-  float flux = galaxyFlux(d, color);
-  float hPx = scaleRadius() / d * uPixelsPerRadian * uPixelRatio;
+  float flux = galaxyFlux(d, D, color) / (D * D);
+  float hPx = scaleRadius() / d * uPixelsPerRadian * uPixelRatio / D;
   // Resolved galaxies are drawn as discs instead (render the same light).
   float point = 1.0 - smoothstep(0.6, 1.6, hPx);
   float peak = min(flux, 1.0) * point;
@@ -81,7 +88,7 @@ void main() {
     gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
     return;
   }
-  vec4 view = modelViewMatrix * vec4(uIcrfToScene * (rel / d), 0.0);
+  view.xyz = aberrateDir(normalize(view.xyz));
   gl_Position = projectionMatrix * vec4(view.xyz, 1.0);
   gl_Position.z = gl_Position.w * 0.999999;
   float sigma = uSigma * uPixelRatio * min(pow(max(flux * point * 33.0, 1.0), 0.3), 8.0);
@@ -117,10 +124,14 @@ const float EXTENT = 5.0;
 void main() {
   vec3 rel = relative();
   float d = length(rel);
+  vec4 centre = modelViewMatrix * vec4(uIcrfToScene * (rel / d), 0.0);
+  float D = dopplerRest(normalize(centre.xyz));
   vec3 color;
-  float flux = galaxyFlux(d, color);
+  // The disc keeps its surface brightness gain; its area shrinks by D^2 as it is drawn.
+  float flux = galaxyFlux(d, D, color);
   float h = scaleRadius();
-  float hPx = h / d * uPixelsPerRadian * uPixelRatio;
+  float hPx0 = h / d * uPixelsPerRadian * uPixelRatio;
+  float hPx = hPx0 / D;
   float disc = smoothstep(0.6, 1.6, hPx);
   bool spheroid = mod(floor(flags / ${FLAG_SPHEROID.toFixed(1)}), 2.0) > 0.5;
   bool image = mod(floor(flags / ${FLAG_IMAGE.toFixed(1)}), 2.0) > 0.5;
@@ -156,7 +167,7 @@ void main() {
   // Shrink the whole quad toward the camera (the picture is unchanged) to keep the
   // numbers inside the projection's range.
   vec3 scene = uIcrfToScene * (p * (1e6 / d));
-  vec4 mv = modelViewMatrix * vec4(scene, 1.0);
+  vec4 mv = relativistic(modelViewMatrix * vec4(scene, 1.0));
   gl_Position = projectionMatrix * mv;
   gl_Position.z = gl_Position.w * 0.999999;
   vColor = color;
@@ -165,7 +176,8 @@ void main() {
   // Value per unit of the normalised profile: the same total light as the point would
   // have (flux times 2 pi sigma^2), spread over the profile.
   float sigma = uSigma * uPixelRatio;
-  vScale = flux * disc * 6.2831853 * sigma * sigma / (hPx * hPx * tilt);
+  // (Per unit of the unshifted profile: the quad itself is drawn D times smaller.)
+  vScale = flux * disc * 6.2831853 * sigma * sigma / (hPx0 * hPx0 * tilt);
 }
 `;
 
@@ -215,6 +227,7 @@ export class GalaxyLayer {
       uPixelRatio: { value: pixelRatio },
       uBrightness: { value: 1 },
       uExtBlend: { value: 1 },
+      ...relativityUniforms,
     };
     const common = { blending: THREE.AdditiveBlending, depthTest: false, depthWrite: false, transparent: false, side: THREE.DoubleSide };
     this.pointMaterial = new THREE.ShaderMaterial({ uniforms: this.uniforms, vertexShader: pointVertex, fragmentShader: pointFragment, ...common });
