@@ -4,6 +4,7 @@ import { REDDENING, kelvinToRgb } from '../core/stars';
 import { ICRS_TO_GAL, LIGHT_FUNCTION, MODEL, NORM, R0, Z_SUN, armField, discHole } from '../core/milkyway';
 import { sceneToIcrf } from '../core/frames';
 import type { DustGrid } from './stars';
+import { RELATIVITY_GLSL, relativityUniforms } from './relativity';
 
 /** Width of the face-on arm map, kpc (centred on the Galactic Centre). */
 const ARM_MAP_KPC = 40;
@@ -45,6 +46,7 @@ uniform vec3 uThin;
 uniform vec3 uYoung;
 uniform vec3 uBulge;
 
+${RELATIVITY_GLSL}
 const float R0 = ${R0.toFixed(4)};
 const float ZSUN = ${Z_SUN.toFixed(4)};
 const vec3 RED = vec3(${REDDENING.join(', ')});
@@ -86,7 +88,11 @@ bool slab(vec3 o, vec3 d, out float t0, out float t1) {
 }
 
 void main() {
-  vec3 dir = normalize(uRay * vec3(vNdc * uTan, -1.0));
+  // From a ship near light speed, the light seen along this ray left the Galaxy along
+  // the rest-frame direction (aberration), Doppler shifted by D.
+  vec3 seen = restDir(normalize(vec3(vNdc * uTan, -1.0)));
+  float D = dopplerRest(seen);
+  vec3 dir = normalize(uRay * seen);
   float t0, t1;
   if (!slab(uCam, dir, t0, t1)) { gl_FragColor = vec4(0.0); return; }
   float a = max(t0, 0.002);
@@ -132,7 +138,8 @@ void main() {
     tau += dt;
     if (tau > 40.0) break;
   }
-  gl_FragColor = vec4(light * uScale, 1.0);
+  // Starlight, shifted as a 5,500 K blackbody's would be.
+  gl_FragColor = vec4(min(light * uScale * dopplerTint(D, 5500.0), 6e4), 1.0);
 }
 `;
 
@@ -229,6 +236,7 @@ export class MilkyWayGlow {
         uThin: { value: tint(6000) },
         uYoung: { value: tint(11000) },
         uBulge: { value: tint(4700) },
+        ...relativityUniforms,
       },
       vertexShader,
       fragmentShader,

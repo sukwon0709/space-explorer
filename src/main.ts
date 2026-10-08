@@ -49,8 +49,10 @@ import { FlightControls, FlightHud } from './ui/flight';
 import { WalkControls } from './ui/walk';
 import { Walker, type WalkWorld } from './core/walker';
 import { Lander } from './render/lander';
-import { Ship, apsides, type FlightWorld, type Source, type WarpLimiter } from './core/flight';
+import { BOOST, Ship, apsides, type FlightWorld, type Source, type WarpLimiter } from './core/flight';
 import { C_KMS, G0, GM, SolarGravity } from './core/gravity';
+import { SUN_V, Trip, aberrate, betaOf, doppler, forwardBackgroundFlux, freeStep, gammaOf, surfaceGain } from './core/relativity';
+import { relativityUniforms, setRelativity } from './render/relativity';
 import { hasRotation, iauBodyToScene } from './core/iau';
 import { horizon } from './core/kerr';
 import { SUN_GM_KM } from './core/blackholes';
@@ -1210,7 +1212,10 @@ async function main() {
   };
 
   const controls = new FlightControls({
-    warp: () => (ship && !ship.warp.on && !flight.going && flight.target !== undefined ? travel() : toggleWarp()),
+    warp: () => {
+      if (rocket.on) return rocketGo();
+      return ship && !ship.warp.on && !flight.going && flight.target !== undefined ? travel() : toggleWarp();
+    },
     assist: () => {
       if (!ship) return;
       ship.assist = !ship.assist;
@@ -1229,6 +1234,7 @@ async function main() {
       else jump(flight.target);
     },
     stepOut: () => stepOut(),
+    drive: () => setRocket(!rocket.on),
     exit: () => setFlight(false),
   });
   const hud = new FlightHud();
@@ -1243,6 +1249,26 @@ async function main() {
     assist: params.get('assist') !== '0',
   };
   let ship: Ship | undefined;
+  // ---- the rocket: real physics at near light speed --------------------------------
+  // Instead of the warp drive (faster than light, a fiction), a rocket under constant
+  // proper acceleration (core/relativity.ts). Time on board runs slow against the
+  // stars' time, and the sky changes: aberration, Doppler shift, the starbow.
+  const rocket = {
+    on: params.get('drive') === 'rocket',
+    /** A trip under way: accelerate halfway, turn around, decelerate to rest. */
+    trip: undefined as undefined | { trip: Trip; target: number; start: Vec3; dir: Vec3; tau: number },
+    /** Proper velocity (km/s, scene axes) relative to the ship's reference, in free flight. */
+    u: [0, 0, 0] as Vec3,
+    /** Time on board, and the stars' time, since the rocket was lit (s). */
+    tau: 0,
+    earth: 0,
+    /** The stars' time (TDB s) it is now, which can run past the end of the ephemeris. */
+    now: 0,
+    /** Engine power the warp drive had (restored when switching back). */
+    warpPower: 10,
+  };
+  /** Velocity (fraction of c, scene axes) for the sky shaders and labels this frame. */
+  const beta: Vec3 = [0, 0, 0];
   /** Camera direction and up last frame, for taking over the view. */
   const lastView = { eye: [0, 0, 0] as Vec3, dir: [0, 0, -1] as Vec3, up: [0, 1, 0] as Vec3 };
   const flyButton = document.createElement('button');
@@ -1273,7 +1299,14 @@ async function main() {
       followSun = false;
       fov = 60;
       hud.say(`You have the controls, near ${nameOf(ref)}. Pick a destination and press X to fly there, or W to thrust and drag to turn.`, 8);
+      if (rocket.on) setRocket(true);
     } else if (!on && ship) {
+      if (rocket.on) {
+        // Back to the stars' time running at its usual pace.
+        rocket.trip = undefined;
+        clock.rate = 1;
+        syncRate();
+      }
       const eye = ship.position(flightWorld, clock.tdb);
       const focus = ship.ref;
       ship = undefined;
@@ -1322,6 +1355,120 @@ async function main() {
     setFlight(false);
     flight.jumping = 'start';
     flyTo(id);
+  };
+  /** Switch between the warp drive and the rocket. */
+  const setRocket = (on: boolean) => {
+    if (!ship) return;
+    const tdb = clock.tdb;
+    if (ship.warp.on) ship.dropWarp(flightWorld, tdb);
+    flight.aligning = flight.going = false;
+    rocket.on = on;
+    rocket.trip = undefined;
+    if (on) {
+      // Start at rest in the reference's frame, at 1 g: what a crew could live with.
+      ship.stop(flightWorld, tdb);
+      rocket.u = [0, 0, 0];
+      ship.vel = ship.frameVelocity(flightWorld, tdb);
+      rocket.warpPower = ship.power;
+      ship.power = 1;
+      flight.power = 1;
+      rocket.tau = rocket.earth = 0;
+      rocket.now = tdb;
+      hud.say('Rocket drive: real physics, nothing faster than light. Pick a destination and press X; W thrusts. The time bar sets how fast time on board runs.', 9);
+    } else {
+      ship.power = rocket.warpPower;
+      flight.power = ship.power;
+      ship.vel = ship.frameVelocity(flightWorld, tdb);
+      clock.rate = 1;
+      syncRate();
+      hud.say('Warp drive: faster than light (a fiction), no relativity');
+    }
+  };
+  /** Where a trip to `id` stops: the warp drive's arrival distance, or the usual view. */
+  const stopDistance = (id: number, tdb: number) => {
+    const l = warpLimiters(tdb).find((x) => x.id === id);
+    return l ? l.radius + (l.soft ? Math.max(l.radius, viewFor(id).distance) * 0.5 : l.arrive) : viewFor(id).distance;
+  };
+  /** X with the rocket: turn toward the destination, then fly there at the engines' g. */
+  const rocketGo = () => {
+    if (!ship) return;
+    if (rocket.trip) {
+      // Engines off: coast on at this speed.
+      const st = rocket.trip.trip.at(rocket.trip.tau);
+      const v = st.beta * C_KMS;
+      rocket.u = [rocket.trip.dir[0] * v * st.gamma, rocket.trip.dir[1] * v * st.gamma, rocket.trip.dir[2] * v * st.gamma];
+      rocket.trip = undefined;
+      hud.say('Engines off: coasting. X again flies on to the destination.');
+      return;
+    }
+    if (flight.target === undefined) return hud.say('Pick a destination first: type a name or click a label');
+    flight.aligning = flight.going = true;
+    controls.turned = false;
+    hud.say(`Turning toward ${nameOf(flight.target)}`);
+  };
+  /** Light the engines for a trip to the destination, from wherever the ship is now. */
+  const startTrip = (id: number) => {
+    if (!ship) return;
+    const tdb = clock.tdb;
+    const here = ship.position(flightWorld, tdb);
+    const start = sub(here, flightWorld.position(id, tdb));
+    const d = length(start);
+    const dist = d - stopDistance(id, tdb);
+    if (dist <= 0) return hud.say(`You are already at ${nameOf(id)}`);
+    // A trip starts from rest: any coasting speed is dropped (the engines spend it first).
+    const trip = new Trip(dist, ship.power * G0);
+    ship.ref = id;
+    ship.rel = [...start];
+    ship.landed = undefined;
+    const dir: Vec3 = [-start[0] / d, -start[1] / d, -start[2] / d];
+    rocket.trip = { trip, target: id, start, dir, tau: 0 };
+    rocket.u = [0, 0, 0];
+    // Time on board runs so the whole trip takes about a minute (the time bar changes it).
+    clock.rate = Math.max(1, trip.tau / 60);
+    clock.paused = false;
+    syncRate();
+    hud.say(`Off to ${nameOf(id)} at ${formatG(ship.power)}: ${formatYears(trip.tau)} on board, ${formatYears(trip.t)} on Earth. Top speed ${formatBeta(trip.peakBeta)}.`, 10);
+  };
+  /**
+   * Advance the rocket `dtau` seconds of time on board; returns the stars' time passed.
+   * On a trip the motion is exact (core/relativity.ts Trip); in free flight the engines
+   * push along the ship's axes and nothing else acts (gravity is left out).
+   */
+  const stepRocket = (s: Ship, dtau: number, input: { thrust: Vec3; boost: boolean }): number => {
+    const r = rocket.trip;
+    if (r) {
+      const before = r.trip.at(r.tau);
+      const tauBefore = r.tau;
+      r.tau = Math.max(0, Math.min(r.trip.tau, r.tau + dtau));
+      const st = r.trip.at(r.tau);
+      s.ref = r.target;
+      for (let k = 0; k < 3; k++) {
+        s.rel[k] = r.start[k] + r.dir[k] * st.x;
+        s.vel[k] = r.dir[k] * st.beta * C_KMS;
+      }
+      rocket.tau += r.tau - tauBefore;
+      const dt = st.t - before.t;
+      if (r.tau >= r.trip.tau) {
+        rocket.trip = undefined;
+        rocket.u = [0, 0, 0];
+        s.vel = [0, 0, 0];
+        clock.rate = 1;
+        syncRate();
+        hud.say(`Arrived at ${nameOf(r.target)}: ${formatYears(r.trip.tau)} passed on board, ${formatYears(r.trip.t)} on Earth.`, 12);
+      }
+      return dt;
+    }
+    if (dtau <= 0) return 0;
+    const a = s.power * G0 * (input.boost ? BOOST : 1);
+    const t = input.thrust;
+    const fwd = s.forward(), right = s.right(), up = s.up();
+    const alpha: Vec3 = [0, 0, 0];
+    for (let k = 0; k < 3; k++) alpha[k] = a * (t[0] * right[k] + t[1] * up[k] + t[2] * fwd[k]);
+    rocket.tau += dtau;
+    const dt = freeStep(s.rel, rocket.u, alpha, dtau);
+    betaOf(rocket.u, s.vel);
+    for (let k = 0; k < 3; k++) s.vel[k] *= C_KMS;
+    return dt;
   };
   // Events and tours move the camera themselves: they leave the ship (and stop walking).
   eventSelect.addEventListener('change', () => { setFlight(false); setWalking(undefined); }, { capture: true });
@@ -1556,9 +1703,27 @@ async function main() {
       if (flight.going && left < 0.01) {
         // Nose on the target: away we go (and keep tracking it on the way).
         flight.going = false;
-        toggleWarp(true);
-        if (!s.warp.on) flight.aligning = false;
+        if (rocket.on) {
+          flight.aligning = false;
+          startTrip(flight.target);
+        } else {
+          toggleWarp(true);
+          if (!s.warp.on) flight.aligning = false;
+        }
       } else if (left < 1e-4 && !s.warp.on && !flight.going) flight.aligning = false;
+    }
+    if (rocket.on) {
+      // The rocket: turning as usual, then time on board at the time bar's rate.
+      const input = controls.input(false);
+      s.step(flightWorld, tdb, 0, dt, { ...input, thrust: [0, 0, 0] }, []);
+      if (rocket.now <= clock.maxTdb && Math.abs(clock.tdb - rocket.now) > 1) rocket.now = clock.tdb;
+      const dtau = clock.paused ? 0 : clock.rate * dt;
+      const passed = stepRocket(s, rocket.trip ? dtau : Math.max(0, dtau), input);
+      rocket.earth += passed;
+      rocket.now += passed;
+      clock.hold(rocket.now);
+      const eye = s.position(flightWorld, clock.tdb);
+      return { eye, dir: s.forward(), up: s.up() };
     }
     const input = controls.input(s.warp.on);
     const limiters = s.warp.on ? warpLimiters(tdb) : [];
@@ -1654,6 +1819,11 @@ async function main() {
   const camSpace = new THREE.Vector3();
   /** Screen point of a direction (scene axes); off screen or behind, pinned to the edge. */
   const markDir = (name: string, d: Vec3, label = '', always = true) => {
+    // From a ship near light speed, things appear shifted toward the motion.
+    if (relativityUniforms.uGamma.value > 1) {
+      const r = length(d);
+      d = aberrate([d[0] / r, d[1] / r, d[2] / r], beta);
+    }
     camSpace.set(d[0], d[1], d[2]).normalize().transformDirection(camera.matrixWorldInverse);
     const tanY = Math.tan((camera.fov * DEG) / 2), tanX = tanY * camera.aspect;
     const front = camSpace.z < 0;
@@ -1668,7 +1838,54 @@ async function main() {
     }
     hud.mark(name, (x * 0.5 + 0.5) * innerWidth, (-y * 0.5 + 0.5) * innerHeight, true, label, !inside);
   };
+  /** The stars' date the rocket has reached: a date, or past the ephemeris, a year. */
+  const earthDate = (tdb: number) => {
+    if (tdb <= clock.maxTdb) return formatUtc(tdbToUtc(tdb)).slice(0, 10);
+    const year = 2000 + tdb / (365.25 * 86400);
+    return `the year ${Math.floor(year).toLocaleString('en-US')}`;
+  };
+  const updateRocketHud = (s: Ship, eye: Vec3) => {
+    const out: string[] = [];
+    const b = length(s.vel) / C_KMS;
+    // gamma from the trip's own hyperbolic motion where there is one (exact near c).
+    const st = rocket.trip?.trip.at(rocket.trip.tau);
+    const g = st ? st.gamma : b > 0 ? gammaOf(Math.min(b, 1 - 1e-16)) : 1;
+    hud.mark('nose', innerWidth / 2, innerHeight / 2, true);
+    out.push(`Rocket · ${b > 0 ? formatBeta(st ? st.beta : b) : 'at rest'}${g > 1.0005 ? ` · γ ${g < 100 ? g.toFixed(3) : Math.round(g).toLocaleString('en-US')}` : ''} relative to the stars`);
+    out.push(`On board ${formatYears(rocket.tau)} since lift-off · on Earth ${formatYears(rocket.earth)} (${earthDate(rocket.now)})`);
+    if (g > 1.0005) out.push(`Time on board runs ${g < 100 ? g.toFixed(2) : Math.round(g).toLocaleString('en-US')}× slower than on Earth`);
+    if (b > 1e-4) {
+      const ahead = doppler(s.vel.map((v) => v / (b * C_KMS)) as Vec3, beta);
+      out.push(`Light ahead blueshifted ×${ahead < 100 ? ahead.toFixed(2) : Math.round(ahead).toLocaleString('en-US')}, behind redshifted ×${(1 / ahead).toPrecision(2)}`);
+      if (ahead > 300) out.push(`The microwave background ahead glows at ${Math.round(2.7255 * ahead).toLocaleString('en-US')} K`);
+      markDir('prograde', s.vel, '', false);
+      markDir('retrograde', [-s.vel[0], -s.vel[1], -s.vel[2]], '', false);
+    } else {
+      hud.mark('prograde', 0, 0, false);
+      hud.mark('retrograde', 0, 0, false);
+    }
+    const r = rocket.trip;
+    if (r) {
+      const left = r.trip.distance - (st?.x ?? 0);
+      const stage = st?.accelerating ? `Accelerating at ${formatG(r.trip.a / G0)}, turnaround in ${formatYears(r.trip.tau / 2 - r.tau)}` : `Decelerating at ${formatG(r.trip.a / G0)}, arriving in ${formatYears(r.trip.tau - r.tau)}`;
+      out.push(stage + ' on board');
+      out.push(`→ ${nameOf(r.target)}: ${formatLightYearsKm(left)} to go · whole trip ${formatYears(r.trip.tau)} on board, ${formatYears(r.trip.t)} on Earth`);
+      markDir('target', sub(flightWorld.position(r.target, clock.tdb), eye), nameOf(r.target));
+    } else {
+      out.push(`Engines ${formatG(s.power)} · W to thrust, wheel to change${flight.target !== undefined ? ` · X flies to ${nameOf(flight.target)}` : ''}`);
+      if (flight.target !== undefined) {
+        const d = sub(flightWorld.position(flight.target, clock.tdb), eye);
+        out.push(`→ ${nameOf(flight.target)}: ${formatLightYearsKm(length(d))}`);
+        markDir('target', d, nameOf(flight.target));
+      } else hud.mark('target', 0, 0, false);
+    }
+    const rate = clock.paused ? 0 : clock.rate;
+    out.push(rate === 0 ? 'Time paused' : `Time on board: ${rate < 120 ? `${rate.toFixed(0)} s` : formatDuration(rate)} per second (time bar)`);
+    if (rocket.now > clock.maxTdb) out.push(`(The planets are shown as of ${earthDate(clock.maxTdb)}, where their ephemeris ends.)`);
+    hud.set(out);
+  };
   const updateFlightHud = (s: Ship, eye: Vec3) => {
+    if (rocket.on) return updateRocketHud(s, eye);
     const tdb = clock.tdb;
     const out: string[] = [];
     const frameVel = s.frameVelocity(flightWorld, tdb);
@@ -2015,7 +2232,8 @@ async function main() {
     const now = performance.now() / 1000;
     const dt = Math.min(0.25, now - last);
     const tdbBefore = clock.tdb;
-    clock.tick(dt);
+    // The rocket keeps the time itself (time on board at the time bar's rate).
+    if (!(ship && rocket.on)) clock.tick(dt);
     last = now;
     frameNumber++;
     syncRate();
@@ -2052,6 +2270,28 @@ async function main() {
     if (frameNumber === 2 && params.get('fly') === '1') {
       setFlight(true);
       if (params.has('target')) flyTo(byName.get(params.get('target')!.toLowerCase()) ?? -1);
+      // ?drive=rocket&trip=0.4: already on the way, this far through the trip (time on board).
+      if (ship && rocket.on && params.has('trip') && flight.target !== undefined) {
+        const d = sub(flightWorld.position(flight.target, clock.tdb), ship.position(flightWorld, clock.tdb));
+        const l = length(d);
+        ship.look([d[0] / l, d[1] / l, d[2] / l], icrfToScene([0, 0, 1]));
+        startTrip(flight.target);
+        if (rocket.trip) {
+          const r = rocket.trip;
+          const tau = Number(params.get('trip')) * r.trip.tau;
+          const passed = stepRocket(ship, tau, { thrust: [0, 0, 0], boost: false });
+          rocket.earth += passed;
+          rocket.now += passed;
+          clock.hold(rocket.now);
+        }
+        if (params.has('rate')) {
+          clock.rate = Number(params.get('rate')) || 1;
+          clock.paused = Number(params.get('rate')) === 0;
+          syncRate();
+        }
+        if (params.has('look')) ship.rotateBody([0, Number(params.get('look')) * DEG, 0]);
+        if (params.has('fov')) fov = Number(params.get('fov'));
+      }
     }
     if (flight.jumping === 'start' && rig.flying) flight.jumping = 'flying';
     if (flight.jumping === 'flying' && !rig.flying) {
@@ -2173,6 +2413,10 @@ async function main() {
     lastView.up = [...viewUp];
     camera.updateProjectionMatrix();
     camera.updateMatrixWorld();
+    // The ship's velocity, for the relativistic sky (stars, galaxies, glow, background).
+    beta[0] = beta[1] = beta[2] = 0;
+    if (ship && !ship.warp.on) for (let k = 0; k < 3; k++) beta[k] = ship.vel[k] / C_KMS;
+    setRelativity(beta, camera);
     frustum.setFromProjectionMatrix(projView.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
     const ppr = pixelsPerRadian();
     let daylight = 0;
@@ -2236,7 +2480,12 @@ async function main() {
     const su = stars.uniforms;
     // A star of magnitude `limit` peaks at 1/400 of full brightness (9/255 on screen);
     // fainter ones fade out over the next 1.5 magnitudes.
-    su.uMsat.value = limit - 6.5;
+    // From a ship near light speed the sky ahead blazes (a blackbody's light goes up with
+    // its Doppler-shifted temperature): the eye adapts, partly (the square root of the
+    // Milky Way's gain straight ahead), which dims every layer below alike.
+    const gammaNow = relativityUniforms.uGamma.value;
+    const adapt = gammaNow > 1.001 ? Math.min(12, 1.25 * Math.log10(surfaceGain(gammaNow * (1 + Math.sqrt(1 - 1 / (gammaNow * gammaNow))), 5500))) : 0;
+    su.uMsat.value = limit - 6.5 - adapt;
     su.uPixelsPerRadian.value = ppr;
     su.uBrightness.value = 1 - 0.98 * daylight;
     stars.loadLimit = limit + (quality === 'low' ? 0.6 : 1.6);
@@ -2258,7 +2507,19 @@ async function main() {
     // that the galaxies thin to a web in front of it.
     const fromSunMpc = Math.hypot(camMpc[0], camMpc[1], camMpc[2]);
     const cmbOpacity = (layers.cmb ? 0.8 : 0.8 * smoothstep(1500, 6000, fromSunMpc)) * (1 - 0.98 * daylight);
-    cmb?.update(camera, camMpc, cmbOpacity);
+    // The background's own light, blueshifted into view ahead of a fast enough ship: in
+    // the diffuse units above, the Sun's surface is V = -10.61 mag/arcsec^2.
+    const surfaceLight = (1 - 0.98 * daylight) * 10 ** (-0.4 * (-10.61 - muRef));
+    // Faster still, that patch is smaller than a pixel: drawn as a point with all its light.
+    let cmbPoint: { peak: number; sigma: number; ppr: number } | undefined;
+    const g = relativityUniforms.uGamma.value;
+    if (g > 100 && (Math.sqrt(Math.max(0, (2 * g * 2.7255) / 600 - 1)) / g) * ppr < 1) {
+      const m = SUN_V - 2.5 * Math.log10(forwardBackgroundFlux(g));
+      const flux = 10 ** (-0.4 * (m - su.uMsat.value)) * (1 - 0.98 * daylight);
+      const sigma = su.uSigma.value * pixelRatio * Math.min(Math.pow(Math.max(flux * 33, 1), 0.3), 8);
+      cmbPoint = { peak: Math.min(flux, 1), sigma, ppr: ppr * pixelRatio };
+    }
+    cmb?.update(camera, camMpc, cmbOpacity, surfaceLight, cmbPoint);
     // The Sun is drawn as a star once its disc is a point (beyond 2,000 AU).
     const sunFar = length(sub(sunPos, eye, rel)) > 2000 * AU;
     system.sun.group.visible = !sunFar;
@@ -2361,19 +2622,28 @@ async function main() {
       const galCam = icrsPcToGalactocentric(camPc);
       const glowScale = (1 - 0.98 * daylight) * 10 ** (-0.4 * (26.402 - muRef - boost));
       const setup = (cam: THREE.PerspectiveCamera, p: number, size?: number) => {
+        setRelativity(beta, cam);
         su.uPixelsPerRadian.value = p;
         glow.update(renderer, cam, galCam, limit, glowScale, size);
         deep.update(camMpc, galaxyMsat, p, 1 - 0.98 * daylight, rig.distance);
-        cmb?.update(cam, camMpc, cmbOpacity);
+        cmb?.update(cam, camMpc, cmbOpacity, surfaceLight, cmbPoint);
       };
       bhs.draw(renderer, scene, camera, rig.focus, eye, holeRel, clock.tdb, frameNumber, ppr, (face, size) => setup(face, size / 2, size), () => setup(camera, ppr));
+      setRelativity(beta, camera);
     } else renderer.render(scene, camera);
 
     // Labels: projected from camera-relative float64 positions. Placed in order of
     // importance; one that would overlap a label already placed is hidden.
     const placed: Array<[number, number]> = [];
+    const moving = relativityUniforms.uGamma.value > 1;
     const place = (id: number, label: HTMLElement, p: Vec3, near: boolean) => {
       sub(p, eye, rel);
+      // Where its light appears from the moving ship (aberration), as the shaders draw it.
+      if (moving) {
+        const r = length(rel);
+        aberrate([rel[0] / r, rel[1] / r, rel[2] / r], beta, rel);
+        for (let k = 0; k < 3; k++) rel[k] *= r;
+      }
       // Only the direction matters: a point far beyond the far plane (another galaxy)
       // is labelled where it appears.
       const k = 1e6 / Math.max(length(rel), 1e-9);
@@ -2767,6 +3037,33 @@ function formatSpeed(kms: number): string {
   if (c < 3e5) return `${c < 10 ? c.toFixed(2) : Math.round(c).toLocaleString('en-US')} × light speed`;
   const ly = kms / LIGHT_YEAR_KM;
   return `${ly < 1e6 ? ly.toPrecision(3) : ly.toExponential(2)} light years a second`;
+}
+
+function formatLightYearsKm(km: number): string {
+  const ly = km / LIGHT_YEAR_KM;
+  if (ly < 0.01) return formatDistance(km);
+  return `${ly < 100 ? ly.toFixed(2) : Math.round(ly).toLocaleString('en-US')} light years`;
+}
+
+/** A time span in years, for trips at near light speed. */
+function formatYears(s: number): string {
+  const y = s / (365.25 * 86400);
+  if (y < 1) return `${(y * 365.25).toFixed(0)} days`;
+  if (y < 100) return `${y.toFixed(y < 10 ? 2 : 1)} years`;
+  return `${Math.round(y).toLocaleString('en-US')} years`;
+}
+
+/** A speed as a fraction of light, with enough nines to show it. */
+function formatBeta(b: number): string {
+  if (b < 0.001) return `${(b * C_KMS).toFixed(0)} km/s`;
+  if (b < 0.99) return `${b.toFixed(3)} c`;
+  // 0.99999 c: as many nines as 1 - beta needs (from gamma, exactly).
+  const nines = Math.min(15, Math.floor(-Math.log10(1 - b)) + 2);
+  return `${b.toFixed(nines)} c`;
+}
+
+function formatG(g: number): string {
+  return `${g < 1 ? g.toPrecision(2) : Math.round(g).toLocaleString('en-US')} g`;
 }
 
 function formatDuration(s: number): string {

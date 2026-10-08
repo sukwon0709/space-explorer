@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { Vec3 } from '../core/ephemeris';
 import { icrfToScene } from '../core/frames';
+import { RELATIVITY_GLSL, relativityUniforms } from './relativity';
 
 /** One telescope image (data/images/index.json, from pipeline/fetch_images.py). */
 export interface SkyImage {
@@ -68,13 +69,17 @@ uniform vec3 uB;
 uniform vec2 uHalf;
 uniform mat3 uIcrfToScene;
 varying vec2 vUv;
+varying float vD;
+${RELATIVITY_GLSL}
 void main() {
   vec3 off = corner.x * uHalf.x * uA + corner.y * uHalf.y * uB;
   vUv = vec2(0.5 - 0.5 * corner.x, 0.5 + 0.5 * corner.y);
   vec3 p = uRel + off;
   // Shrink toward the camera (the picture is unchanged) to stay inside the projection's range.
   vec3 scene = uIcrfToScene * (p * (1e6 / max(length(uRel), 1e-12)));
-  gl_Position = projectionMatrix * modelViewMatrix * vec4(scene, 1.0);
+  vec4 mv = modelViewMatrix * vec4(scene, 1.0);
+  vD = dopplerRest(normalize(mv.xyz));
+  gl_Position = projectionMatrix * relativistic(mv);
   gl_Position.z = gl_Position.w * 0.999999;
 }
 `;
@@ -89,6 +94,8 @@ uniform float uHoleW;
 // A close-up fades out toward its own edge.
 uniform float uEdge;
 varying vec2 vUv;
+varying float vD;
+${RELATIVITY_GLSL}
 float feather(vec2 q) {
   return smoothstep(1.0, 0.6, max(abs(q.x), abs(q.y)));
 }
@@ -99,7 +106,8 @@ void main() {
   if (uHoleW > 0.0) w *= 1.0 - uHoleW * feather((vUv - uHole.xy) / uHole.zw);
   vec3 t = texture2D(uTex, vUv).rgb;
   // Clip before blending, so that a saturated picture and its close-up still add up to one.
-  vec3 c = min(t * t * uScale, 1.0);
+  // From a ship near light speed: Doppler shifted as if the light were a 6,000 K blackbody's.
+  vec3 c = min(t * t * uScale * dopplerTint(vD, 6000.0), 1.0);
   if (max(c.r, max(c.g, c.b)) * w < 1.0 / 2048.0) discard;
   // The pictures add up after encoding, so the weights apply to the encoded colour: a
   // picture and its close-up then blend to the same value where they agree (weighting
@@ -189,6 +197,7 @@ export class ImageLayer {
       uHole: { value: new THREE.Vector4(0.5, 0.5, 1, 1) },
       uHoleW: { value: 0 },
       uEdge: { value: kind === 'plates' ? 0 : 1 },
+      ...relativityUniforms,
     };
     const material = new THREE.ShaderMaterial({
       uniforms, vertexShader, fragmentShader,
