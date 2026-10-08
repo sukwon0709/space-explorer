@@ -205,6 +205,29 @@ describe('Feeling gravity', () => {
     expect(Math.abs(len(ship.pull) * 1000 - 1.62) / 1.62).toBeLessThan(0.15);
   });
 
+  it('tears a person apart near a stellar black hole, but not at Sgr A*\'s horizon', () => {
+    // Tides go as M / r^3, and the horizon as M: the bigger the hole, the gentler its edge.
+    const sun = GM[10], C = 299792.458;
+    const near = (mass: number, rs: number) => {
+      const hole: FlightWorld = {
+        ...world,
+        position: (_id, _t, out = [0, 0, 0]) => { out[0] = out[1] = out[2] = 0; return out; },
+        acceleration: (_id, _t, out = [0, 0, 0]) => { out[0] = out[1] = out[2] = 0; return out; },
+        sources: () => [{ id: 1, gm: mass * sun, horizon: (2 * mass * sun) / C ** 2 }],
+        altitude: () => NaN,
+        radius: () => 1,
+      };
+      const ship = new Ship(1, [rs * (2 * mass * sun) / C ** 2, 0, 0]);
+      ship.assist = false;
+      ship.step(hole, 0, 1e-6, 0, IDLE);
+      return (stretch(ship.tides).along * 2) / 9.80665; // g over 2 m
+    };
+    const stellar = near(9.6, 3), sgrA = near(4.3e6, 3);
+    console.log(`Tides over 2 m at three Schwarzschild radii: Gaia BH1 ${stellar.toExponential(2)} g, Sgr A* ${sgrA.toExponential(2)} g`);
+    expect(stellar).toBeGreaterThan(1e5);
+    expect(sgrA).toBeLessThan(1e-3);
+  });
+
   it('keeps a low orbit\'s forecast closed: one revolution, back where it started', () => {
     const r = bodyById(399).radius[0] + 400;
     const ship = new Ship(399, [r, 0, 0]);

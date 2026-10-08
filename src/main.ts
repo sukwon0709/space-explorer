@@ -2172,7 +2172,7 @@ async function main() {
   const surfaceOf = (id: number) => findBody(id)?.radius[0] ?? (isStar(id) ? starOf(id).radius * SOLAR_RADIUS : isHole(id) ? holeHorizon(id) : 0);
   const hasParent = (id: number) => findBody(id) !== undefined && id !== 10;
   /** A name in a sentence: "the Sun", "Jupiter". */
-  const theName = (id: number) => (id === 10 ? 'the Sun' : nameOf(id));
+  const theName = (id: number) => (id === 10 ? 'the Sun' : id === 301 ? 'the Moon' : nameOf(id));
 
   /** Y: put the ship on a hyperbola past the destination, passing behind it to gain speed. */
   const setupFlyby = () => {
@@ -2214,7 +2214,7 @@ async function main() {
     const pass = encounter(start.rel, start.vel, GM[id])!;
     const before = length(add(vP, start.vel));
     flyby = { id, parent, before, start: d0, rate: clock.rate, logRate: Math.log(Math.max(1, clock.rate)) };
-    hud.say(`Flyby of ${body.name}: coasting in at ${formatSpeed(vInf)} relative to it, engines and flight assist off. Closest approach ${formatDistance(pass.peri - R)} up, ${formatDuration(pass.toPeri)} away; time runs faster to suit. Watch your speed relative to ${theName(parent)}.`, 10);
+    hud.say(`Flyby of ${theName(id)}: coasting in at ${formatSpeed(vInf)} relative to it, engines and flight assist off. Closest approach ${formatDistance(pass.peri - R)} up, ${formatDuration(pass.toPeri)} away; time runs faster to suit. Watch your speed relative to ${theName(parent)}.`, 10);
   };
 
   /** Keep time paced to the pass: quick far out, slow enough at closest approach to see it. */
@@ -2239,7 +2239,7 @@ async function main() {
       s.rebase(flightWorld, flyby.parent, tdb);
       const after = length(s.vel);
       const gain = after - flyby.before;
-      return done(`Flyby of ${nameOf(flyby.id)} complete: ${formatSpeed(flyby.before)} → ${formatSpeed(after)} relative to ${theName(flyby.parent)} (${gain >= 0 ? '+' : '−'}${formatSpeed(Math.abs(gain))}), all from gravity. Back to real time.`);
+      return done(`Flyby of ${theName(flyby.id)} complete: ${formatSpeed(flyby.before)} → ${formatSpeed(after)} relative to ${theName(flyby.parent)} (${gain >= 0 ? '+' : '−'}${formatSpeed(Math.abs(gain))}), all from gravity. Back to real time.`);
     }
     // About six seconds to cover the current distance at the current speed.
     const target = Math.min(3e5, Math.max(1, r / Math.max(v, 1e-3) / 6));
@@ -2340,7 +2340,7 @@ async function main() {
       }
       const alt = length(f.point(next.closest)) - surfaceOf(id);
       const hit = f.end === 'impact' && !exit && f.frames[f.n - 1] === id;
-      out.push(`Flyby of ${nameOf(id)} in ${formatDuration(t0 - tdb)}: closest ${formatDistance(Math.max(0, alt))} up${hit ? ' (into the ground!)' : ''}`);
+      out.push(`Flyby of ${theName(id)} in ${formatDuration(t0 - tdb)}: closest ${formatDistance(Math.max(0, alt))} up${hit ? ' (into the ground!)' : ''}`);
       if (after !== undefined && !hit) out.push(`  Gravity assist: ${formatSpeed(before)} → ${formatSpeed(after)} relative to ${theName(parent)} (${after >= before ? '+' : '−'}${formatSpeed(Math.abs(after - before))})`);
       if (gravityView.path) {
         markDir('encounter', pointAt(next.closest), `${nameOf(id)} · ${formatDuration(f.t[next.closest] - tdb)}`, false);
@@ -2349,7 +2349,7 @@ async function main() {
     }
     if (f.end === 'impact' && f.t[f.n - 1] > tdb) {
       const id = f.frames[f.n - 1];
-      out.push(`On course to hit ${nameOf(id)} in ${formatDuration(f.t[f.n - 1] - tdb)}${s.assist ? ' if the engines stop' : ''}`);
+      out.push(`On course to hit ${theName(id)} in ${formatDuration(f.t[f.n - 1] - tdb)}${s.assist ? ' if the engines stop' : ''}`);
       if (gravityView.path) {
         markDir('impact', pointAt(f.n - 1), `Impact · ${formatDuration(f.t[f.n - 1] - tdb)}`, false);
         shown.impact = true;
@@ -2369,7 +2369,7 @@ async function main() {
         // Far before and far after the pass (deep in the well the speed is borrowed).
         const before = length(add(vBody, pass.vIn));
         const after = length(add(vBody, pass.vOut));
-        out.push(`Swinging past ${nameOf(s.ref)}${pass.toPeri > 0 ? `, closest in ${formatDuration(pass.toPeri)}` : ''}: path bent ${(pass.turn / DEG).toFixed(0)}°`);
+        out.push(`Swinging past ${theName(s.ref)}${pass.toPeri > 0 ? `, closest in ${formatDuration(pass.toPeri)}` : ''}: path bent ${(pass.turn / DEG).toFixed(0)}°`);
         out.push(`  Gravity assist: ${formatSpeed(before)} in → ${formatSpeed(after)} out, relative to ${theName(parent)} (${after >= before ? '+' : '−'}${formatSpeed(Math.abs(after - before))})`);
       }
     }
