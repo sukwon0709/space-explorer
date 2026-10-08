@@ -13,6 +13,12 @@ export interface FlightActions {
   stepOut(): void;
   /** Switch between the warp drive and the relativistic rocket. */
   drive(): void;
+  /** Put the ship on an approach for a gravity assist past the destination. */
+  flyby(): void;
+  /** Show or hide the coasting path ahead. */
+  path(): void;
+  /** Show or hide the gravity well. */
+  well(): void;
   exit(): void;
 }
 
@@ -48,7 +54,7 @@ export class FlightControls {
         return;
       }
       if (e.repeat) return;
-      const action = { KeyX: actions.warp, KeyZ: actions.assist, KeyT: actions.align, KeyG: actions.jump, KeyO: actions.stepOut, KeyV: actions.drive, Escape: actions.exit }[e.code];
+      const action = { KeyX: actions.warp, KeyZ: actions.assist, KeyT: actions.align, KeyG: actions.jump, KeyO: actions.stepOut, KeyV: actions.drive, KeyY: actions.flyby, KeyP: actions.path, KeyH: actions.well, Escape: actions.exit }[e.code];
       if (action) {
         action();
         e.preventDefault();
@@ -81,7 +87,7 @@ export class FlightControls {
     left.append(hold('Thrust', 'KeyW', 'Forward thrust (W)'), hold('Reverse', 'KeyS', 'Reverse thrust (S)'), hold('⟲', 'KeyQ', 'Roll left (Q)'), hold('⟳', 'KeyE', 'Roll right (E)'));
     const right = document.createElement('div');
     right.className = 'pad-group';
-    right.append(tap('Go', actions.warp, 'Fly to the destination, or warp ahead; again to stop (X)'), tap('Assist', actions.assist, 'Flight assist on or off (Z)'), tap('Aim', actions.align, 'Turn toward the target (T)'), tap('Jump', actions.jump, 'Jump to the target (G)'), tap('Out', actions.stepOut, 'Step outside, once landed (O)'), tap('Drive', actions.drive, 'Warp drive or relativistic rocket (V)'));
+    right.append(tap('Go', actions.warp, 'Fly to the destination, or warp ahead; again to stop (X)'), tap('Assist', actions.assist, 'Flight assist on or off (Z)'), tap('Aim', actions.align, 'Turn toward the target (T)'), tap('Jump', actions.jump, 'Jump to the target (G)'), tap('Out', actions.stepOut, 'Step outside, once landed (O)'), tap('Drive', actions.drive, 'Warp drive or relativistic rocket (V)'), tap('Flyby', actions.flyby, 'Swing past the destination for a gravity assist (Y)'), tap('Well', actions.well, 'Gravity well on or off (H)'));
     this.pad.append(left, right);
     document.body.append(this.pad);
   }
@@ -140,6 +146,10 @@ export class FlightHud {
   private readonly marks = new Map<string, HTMLElement>();
   private messageUntil = 0;
   readonly shipHelp: string;
+  private readonly gauge: HTMLElement;
+  private readonly gaugeDots: SVGCircleElement[] = [];
+  private readonly gaugeText: HTMLElement;
+  private readonly vignette: HTMLElement;
 
   constructor() {
     this.el = document.createElement('section');
@@ -163,14 +173,39 @@ export class FlightHud {
       '<b>W / S</b> thrust forward and back · <b>A / D</b> sideways · <b>R / F</b> up and down · <b>Shift</b> ×30 thrust',
       '<b>Drag</b> or <b>arrows</b> to turn · <b>Q / E</b> roll · <b>Wheel</b> engine power · <b>T</b> turn toward the destination',
       '<b>V</b> switches to the rocket: real physics near light speed (1 g, time on board runs slow, the sky shifts); the time bar sets time on board',
+      '<b>Y</b> sets up a flyby of the destination: coast past it, engines off, and gain (or lose) speed from its gravity',
+      '<b>P</b> the path you coast on with the engines off · <b>H</b> the gravity well',
       'Once landed on a solid surface, <b>O</b> steps outside',
       '<b>Z</b> flight assist (holds still when you let go) · <b>Esc</b> leaves the ship',
     ].join('<br>');
     this.help.innerHTML = this.shipHelp;
     helpButton.addEventListener('click', () => { this.help.hidden = !this.help.hidden; });
+    // The tides gauge: a ring of loose objects in the cabin, as tides would pull them
+    // (stretched toward and away from what pulls, squeezed across it), exaggerated.
+    this.gauge = document.createElement('div');
+    this.gauge.className = 'flight-tides';
+    const svgNs = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(svgNs, 'svg');
+    svg.setAttribute('viewBox', '-30 -30 60 60');
+    svg.setAttribute('aria-hidden', 'true');
+    const ring = document.createElementNS(svgNs, 'circle');
+    ring.setAttribute('r', '16');
+    ring.setAttribute('class', 'rest');
+    svg.append(ring);
+    for (let i = 0; i < 16; i++) {
+      const dot = document.createElementNS(svgNs, 'circle');
+      dot.setAttribute('r', '1.8');
+      svg.append(dot);
+      this.gaugeDots.push(dot);
+    }
+    this.gaugeText = document.createElement('div');
+    this.gauge.append(svg, this.gaugeText);
+    this.el.prepend(this.gauge);
+    this.vignette = document.createElement('div');
+    this.vignette.className = 'g-vignette';
     this.el.append(this.lines, helpButton, this.help);
-    document.body.append(this.el, this.message);
-    for (const name of ['nose', 'prograde', 'retrograde', 'target']) {
+    document.body.append(this.vignette, this.el, this.message);
+    for (const name of ['nose', 'prograde', 'retrograde', 'target', 'closest', 'encounter', 'impact']) {
       const m = document.createElement('div');
       m.className = `flight-mark ${name}`;
       m.hidden = true;
@@ -179,8 +214,33 @@ export class FlightHud {
     }
   }
 
+  /**
+   * Draw the tides gauge: `angle` (rad, on screen, counter-clockwise from the right) of
+   * the stretch, `ratio` how elongated to draw it (1 = round), `label` under it.
+   */
+  tides(angle: number, ratio: number, label: string, visible = true): void {
+    this.gauge.hidden = !visible;
+    if (!visible) return;
+    const c = Math.cos(angle), s = Math.sin(angle);
+    const across = 1 / Math.sqrt(ratio);
+    this.gaugeDots.forEach((dot, i) => {
+      const t = (i / this.gaugeDots.length) * 2 * Math.PI;
+      const a = Math.cos(t) * 16 * ratio, b = Math.sin(t) * 16 * across;
+      dot.setAttribute('cx', (a * c - b * s).toFixed(2));
+      dot.setAttribute('cy', (-(a * s + b * c)).toFixed(2));
+    });
+    if (this.gaugeText.textContent !== label) this.gaugeText.textContent = label;
+  }
+
+  /** Darken the edges of the view as the crew would see under a hard push (0..1). */
+  strain(level: number): void {
+    const v = level.toFixed(3);
+    if (this.vignette.style.opacity !== v) this.vignette.style.opacity = v;
+  }
+
   show(on: boolean): void {
     this.el.hidden = !on;
+    if (!on) this.strain(0);
     if (!on) for (const m of this.marks.values()) m.hidden = true;
     if (!on) this.message.textContent = '';
   }

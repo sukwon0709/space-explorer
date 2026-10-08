@@ -4,7 +4,7 @@ import { Orientation } from './core/orientation';
 import { BODIES, RINGS, SYSTEMS, bodyById, findBody, type Body } from './core/bodies';
 import { Clock, tdbToUtc, utcToTdb } from './core/time';
 import { parseSatellites, type SatelliteSnapshot } from './core/satellites';
-import { icrfToScene, length, raDecToIcrf, sceneToIcrf, sub } from './core/frames';
+import { OBLIQUITY_J2000, icrfToScene, length, raDecToIcrf, sceneToIcrf, sub } from './core/frames';
 import type { Vec3 } from './core/ephemeris';
 import { bodyToGeodetic, enu, geodeticToBody, MARS_SPHERE, MOON_SPHERE, WGS84, type Shape } from './core/geodesy';
 import { TileStore, type Manifest } from './core/tilestore';
@@ -53,7 +53,10 @@ import { ShapeBody, type ShapeFrame } from './render/shapebody';
 import type { Mat3 } from './core/orientation';
 import { Lander } from './render/lander';
 import { BOOST, Ship, apsides, type FlightWorld, type Source, type WarpLimiter } from './core/flight';
-import { C_KMS, G0, GM, SolarGravity } from './core/gravity';
+import { C_KMS, G0, GM, SolarGravity, parentOf } from './core/gravity';
+import { Forecast } from './core/forecast';
+import { encounter, flybyStart, stretch } from './core/slingshot';
+import { ForecastLine, WellGrid, type Dent } from './render/gravitywell';
 import { SUN_V, Trip, aberrate, betaOf, doppler, forwardBackgroundFlux, freeStep, gammaOf, surfaceGain } from './core/relativity';
 import { relativityUniforms, setRelativity } from './render/relativity';
 import { hasRotation, iauBodyToScene } from './core/iau';
@@ -1332,6 +1335,15 @@ async function main() {
     },
     stepOut: () => stepOut(),
     drive: () => setRocket(!rocket.on),
+    flyby: () => setupFlyby(),
+    path: () => {
+      gravityView.path = !gravityView.path;
+      hud.say(gravityView.path ? 'Coasting path on: where gravity takes you with the engines off' : 'Coasting path off');
+    },
+    well: () => {
+      gravityView.well = !gravityView.well;
+      hud.say(gravityView.well ? 'Gravity well on: the sheet sinks where gravity pulls hardest' : 'Gravity well off');
+    },
     exit: () => setFlight(false),
   });
   const hud = new FlightHud();
@@ -1398,6 +1410,11 @@ async function main() {
       hud.say(`You have the controls, near ${nameOf(ref)}. Pick a destination and press X to fly there, or W to thrust and drag to turn.`, 8);
       if (rocket.on) setRocket(true);
     } else if (!on && ship) {
+      if (flyby) {
+        flyby = undefined;
+        clock.rate = 1;
+        syncRate();
+      }
       if (rocket.on) {
         // Back to the stars' time running at its usual pace.
         rocket.trip = undefined;
@@ -1929,6 +1946,7 @@ async function main() {
     hud.mark('nose', 0, 0, false);
     hud.mark('prograde', 0, 0, false);
     hud.mark('retrograde', 0, 0, false);
+    hud.tides(0, 1, '', false);
     hud.set(out);
   };
 
@@ -2012,6 +2030,7 @@ async function main() {
     const input = controls.input(s.warp.on);
     const limiters = s.warp.on ? warpLimiters(tdb) : [];
     const events = s.step(flightWorld, tdbBefore, tdb - tdbBefore, dt, input, limiters);
+    paceFlyby(s, input, dt);
     for (const e of events) {
       if (e.kind === 'landed') hud.say(`Landed on ${nameOf(e.id)}`);
       if (e.kind === 'dropped') hud.say(e.id === flight.target ? `Arrived at ${nameOf(e.id)}` : `Dropped out of warp near ${nameOf(e.id)}`);
@@ -2129,6 +2148,277 @@ async function main() {
     const year = 2000 + tdb / (365.25 * 86400);
     return `the year ${Math.floor(year).toLocaleString('en-US')}`;
   };
+  // ---- feeling gravity ----------------------------------------------------------
+  // The coasting path ahead (core/forecast.ts), the gravity well around what the ship
+  // flies by, the tides across the cabin, the push the crew feels, and one key (Y) to
+  // swing past a planet or moon for a gravity assist (core/slingshot.ts).
+  const gravityView = { path: params.get('path') !== '0', well: params.get('well') !== '0' };
+  /** The forecast drawn, and the next one, worked out in the background to replace it. */
+  let forecast = new Forecast();
+  let nextForecast = new Forecast();
+  const forecastLine = new ForecastLine();
+  const wellGrid = new WellGrid();
+  scene.add(forecastLine.line, wellGrid.lines);
+  /** Readouts for the flight display, worked out with the drawing each frame. */
+  let gravityLines: string[] = [];
+  /** How hard the tides pull, by the worst level reached (to say so once on the way up). */
+  let tideLevel = 0;
+  /** A flyby under way: time sped up to suit the pass, until it is over. */
+  let flyby: undefined | { id: number; parent: number; before: number; start: number; rate: number; logRate: number };
+
+  const gmOf = (s: Ship, id: number) => s.sources.find((x) => x.id === id)?.gm ?? GM[id];
+  /** Velocity of `id` relative to `parent` (km/s, scene). */
+  const relVelocity = (id: number, parent: number, tdb: number) => sub(flightWorld.velocity(id, tdb), flightWorld.velocity(parent, tdb), [0, 0, 0]);
+  const surfaceOf = (id: number) => findBody(id)?.radius[0] ?? (isStar(id) ? starOf(id).radius * SOLAR_RADIUS : isHole(id) ? holeHorizon(id) : 0);
+  const hasParent = (id: number) => findBody(id) !== undefined && id !== 10;
+  /** A name in a sentence: "the Sun", "Jupiter". */
+  const theName = (id: number) => (id === 10 ? 'the Sun' : id === 301 ? 'the Moon' : nameOf(id));
+
+  /** Y: put the ship on a hyperbola past the destination, passing behind it to gain speed. */
+  const setupFlyby = () => {
+    if (!ship) return;
+    if (rocket.on) return hud.say('Flybys are flown with the warp drive’s ship: V switches back');
+    const id = flight.target;
+    const tdb = clock.tdb;
+    if (id === undefined) return hud.say('Pick a planet or moon first, then Y sets up a flyby of it');
+    const body = findBody(id);
+    if (!body || id === 10 || GM[id] === undefined || !solar.has(id, tdb)) return hud.say(`Flybys work past planets and moons: pick one as the destination`);
+    const parent = parentOf(id);
+    const vP = relVelocity(id, parent, tdb);
+    const pP = sub(flightWorld.position(id, tdb), flightWorld.position(parent, tdb), [0, 0, 0]);
+    // Tilted 20° out of the body's orbital plane, so the way in looks down on its well
+    // (the kick, along the body's motion tilted as much, keeps cos 20° = 94% of its use).
+    const flat = normalize(cross(pP, vP));
+    const tilt = 20 * DEG;
+    const ahead = normalize(add(scale(normalize(vP), Math.cos(tilt)), scale(flat, Math.sin(tilt))));
+    const normal = normalize(add(scale(flat, Math.cos(tilt)), scale(normalize(vP), -Math.sin(tilt))));
+    // Clear of the rings that would wreck a ship (Saturn's, Uranus's, Neptune's).
+    const rings = (RINGS[id]?.bands ?? []).filter((b) => b.tau >= 0.01);
+    const R = body.radius[0];
+    const peri = Math.max(1.3 * R, rings.length ? 1.08 * Math.max(...rings.map((b) => b.outer)) : 0);
+    // About how fast a ship on a transfer orbit meets it: 0.4 of its own orbital speed.
+    const vInf = 0.4 * length(vP);
+    const d0 = Math.min(0.8 * solar.influence(id, tdb), 50 * peri);
+    const start = flybyStart(GM[id], peri, vInf, ahead, normal, d0);
+    if (ship.warp.on) ship.dropWarp(flightWorld, tdb);
+    flight.aligning = flight.going = false;
+    ship.ref = id;
+    ship.rel = start.rel;
+    ship.vel = start.vel;
+    ship.landed = undefined;
+    ship.spin = [0, 0, 0];
+    ship.assist = flight.assist = false;
+    ship.look(normalize([-start.rel[0], -start.rel[1], -start.rel[2]]), normal);
+    controls.turned = false;
+    clock.paused = false;
+    const pass = encounter(start.rel, start.vel, GM[id])!;
+    const before = length(add(vP, start.vel));
+    flyby = { id, parent, before, start: d0, rate: clock.rate, logRate: Math.log(Math.max(1, clock.rate)) };
+    hud.say(`Flyby of ${theName(id)}: coasting in at ${formatSpeed(vInf)} relative to it, engines and flight assist off. Closest approach ${formatDistance(pass.peri - R)} up, ${formatDuration(pass.toPeri)} away; time runs faster to suit. Watch your speed relative to ${theName(parent)}.`, 10);
+  };
+
+  /** Keep time paced to the pass: quick far out, slow enough at closest approach to see it. */
+  const paceFlyby = (s: Ship, input: { thrust: Vec3 }, dt: number) => {
+    if (!flyby) return;
+    const done = (text: string) => {
+      flyby = undefined;
+      clock.rate = 1;
+      syncRate();
+      hud.say(text, 10);
+    };
+    if (clock.rate !== flyby.rate) {
+      flyby = undefined; // the pilot took the time bar
+      return;
+    }
+    if (input.thrust.some((x) => x !== 0) || s.warp.on) return done('Engines on: back to real time');
+    if (s.landed !== undefined) return done(`Down on ${nameOf(s.landed)}`);
+    const tdb = clock.tdb;
+    const r = length(s.rel), v = length(s.vel);
+    const leaving = s.ref !== flyby.id || (dot(s.rel, s.vel) > 0 && r > flyby.start);
+    if (leaving) {
+      s.rebase(flightWorld, flyby.parent, tdb);
+      const after = length(s.vel);
+      const gain = after - flyby.before;
+      return done(`Flyby of ${theName(flyby.id)} complete: ${formatSpeed(flyby.before)} → ${formatSpeed(after)} relative to ${theName(flyby.parent)} (${gain >= 0 ? '+' : '−'}${formatSpeed(Math.abs(gain))}), all from gravity. Back to real time.`);
+    }
+    // About six seconds to cover the current distance at the current speed.
+    const target = Math.min(3e5, Math.max(1, r / Math.max(v, 1e-3) / 6));
+    flyby.logRate += (Math.log(target) - flyby.logRate) * (1 - Math.exp(-dt / 0.6));
+    clock.rate = flyby.rate = Math.exp(flyby.logRate);
+    syncRate();
+    // Keep the body in view, until the pilot turns: far out its middle, close in its
+    // edge ahead (the horizon sweeping by, not a wall of cloud).
+    if (!controls.turned && !flight.aligning) {
+      const toBody = normalize([-s.rel[0], -s.rel[1], -s.rel[2]]);
+      const along = dot(s.vel, toBody);
+      const side = normalize(sub(s.vel, scale(toBody, along), [0, 0, 0]));
+      const a = Math.min(80 * DEG, 1.08 * Math.asin(Math.min(1, surfaceOf(s.ref) / r)));
+      s.align(normalize(add(scale(toBody, Math.cos(a)), scale(side, Math.sin(a)))), 1.2, dt);
+    }
+  };
+
+  /** Is the forecast still the path the ship is on? */
+  const onForecast = (f: Forecast, s: Ship, tdb: number) => {
+    const p: Vec3 = [0, 0, 0];
+    const frame = f.at(tdb, p);
+    if (frame === undefined) return false;
+    const there = add(sub(flightWorld.position(frame, tdb), flightWorld.position(s.ref, tdb)), p);
+    return length(sub(there, s.rel, [0, 0, 0])) <= 0.005 * Math.max(length(s.rel), 1) + 0.01;
+  };
+
+  const updateGravityView = (s: Ship | undefined, now: number) => {
+    const live = s && !rocket.on && !s.warp.on && s.landed === undefined && s.sources.length > 0;
+    if (!s || !live) {
+      forecastLine.line.visible = false;
+      wellGrid.lines.visible = false;
+      for (const m of ['closest', 'encounter', 'impact']) hud.mark(m, 0, 0, false);
+      gravityLines = [];
+      hud.strain(0);
+      if (s) hud.tides(0, 1, '', !rocket.on && !s.warp.on);
+      return;
+    }
+    const tdb = clock.tdb;
+    const out: string[] = [];
+    const limit = clock.maxTdb;
+    // Work the path out a slice per frame (a few milliseconds at most).
+    const budget = performance.now() + 4;
+    if (!onForecast(forecast, s, tdb)) {
+      forecast.start(flightWorld, s, tdb, limit, now);
+      nextForecast.done = true;
+    }
+    if (!forecast.done) {
+      while (!forecast.advance(flightWorld, chooseRef, 25) && performance.now() < budget);
+    } else {
+      // Refresh in the background every few seconds (moons load, the clock moves on).
+      if (nextForecast.done && nextForecast.n > 0 && nextForecast.startedAt > forecast.startedAt) {
+        [forecast, nextForecast] = [nextForecast, forecast];
+        nextForecast.n = 0;
+      } else if (nextForecast.done && now - forecast.startedAt > 3) nextForecast.start(flightWorld, s, tdb, limit, now);
+      if (!nextForecast.done) while (!nextForecast.advance(flightWorld, chooseRef, 25) && performance.now() < budget);
+    }
+    const f = forecast;
+    const refAt = flightWorld.position(s.ref, tdb);
+    /** Where body `id` is now, relative to the camera (the ship). */
+    const offsets = new Map<number, Vec3>();
+    const offset = (id: number) => {
+      let o = offsets.get(id);
+      if (!o) {
+        o = id === s.ref ? [-s.rel[0], -s.rel[1], -s.rel[2]] : sub(sub(flightWorld.position(id, tdb), refAt, [0, 0, 0]), s.rel, [0, 0, 0]);
+        offsets.set(id, o);
+      }
+      return o;
+    };
+    if (gravityView.path) forecastLine.update(f, tdb, offset, [0, 0, 0], s.assist);
+    else forecastLine.line.visible = false;
+
+    // What lies ahead on the path: closest approach, the next body passed, the ground.
+    const pointAt = (i: number) => add(offset(f.frames[i]), f.point(i));
+    const first = f.runs[0];
+    let shown = { closest: false, encounter: false, impact: false };
+    if (first && gravityView.path) {
+      const c = first.closest;
+      if (c > first.first + 1 && c < first.last && f.t[c] > tdb) {
+        const alt = length(f.point(c)) - surfaceOf(first.frame);
+        markDir('closest', pointAt(c), `Closest ${formatDistance(Math.max(0, alt))} · ${formatDuration(f.t[c] - tdb)}`, false);
+        shown.closest = true;
+      }
+    }
+    const next = f.runs.find((r, k) => k > 0 && r.frame !== parentOf(f.runs[k - 1].frame) && hasParent(r.frame));
+    if (next && f.t[next.first] > tdb) {
+      const id = next.frame;
+      const parent = parentOf(id);
+      const t0 = f.t[next.first];
+      const relIn = f.point(next.first), velIn = f.velocity(next.first);
+      const vBody = relVelocity(id, parent, t0);
+      const before = length(add(vBody, velIn));
+      const exit = f.runs[f.runs.indexOf(next) + 1];
+      let after: number | undefined;
+      if (exit) after = length(add(relVelocity(id, parent, f.t[exit.first - 1]), f.velocity(exit.first - 1)));
+      else {
+        const pass = encounter(relIn, velIn, gmOf(s, id));
+        if (pass) after = length(add(vBody, pass.vOut));
+      }
+      const alt = length(f.point(next.closest)) - surfaceOf(id);
+      const hit = f.end === 'impact' && !exit && f.frames[f.n - 1] === id;
+      out.push(`Flyby of ${theName(id)} in ${formatDuration(t0 - tdb)}: closest ${formatDistance(Math.max(0, alt))} up${hit ? ' (into the ground!)' : ''}`);
+      if (after !== undefined && !hit) out.push(`  Gravity assist: ${formatSpeed(before)} → ${formatSpeed(after)} relative to ${theName(parent)} (${after >= before ? '+' : '−'}${formatSpeed(Math.abs(after - before))})`);
+      if (gravityView.path) {
+        markDir('encounter', pointAt(next.closest), `${nameOf(id)} · ${formatDuration(f.t[next.closest] - tdb)}`, false);
+        shown.encounter = true;
+      }
+    }
+    if (f.end === 'impact' && f.t[f.n - 1] > tdb) {
+      const id = f.frames[f.n - 1];
+      out.push(`On course to hit ${theName(id)} in ${formatDuration(f.t[f.n - 1] - tdb)}${s.assist ? ' if the engines stop' : ''}`);
+      if (gravityView.path) {
+        markDir('impact', pointAt(f.n - 1), `Impact · ${formatDuration(f.t[f.n - 1] - tdb)}`, false);
+        shown.impact = true;
+      }
+    }
+    if (!shown.closest) hud.mark('closest', 0, 0, false);
+    if (!shown.encounter) hud.mark('encounter', 0, 0, false);
+    if (!shown.impact) hud.mark('impact', 0, 0, false);
+
+    // On a pass right now: where the swing leaves the ship, relative to the body's parent.
+    const gm = gmOf(s, s.ref);
+    if (gm && hasParent(s.ref) && f.end !== 'impact') {
+      const pass = encounter(s.rel, s.vel, gm);
+      if (pass) {
+        const parent = parentOf(s.ref);
+        const vBody = relVelocity(s.ref, parent, tdb);
+        // Far before and far after the pass (deep in the well the speed is borrowed).
+        const before = length(add(vBody, pass.vIn));
+        const after = length(add(vBody, pass.vOut));
+        out.push(`Swinging past ${theName(s.ref)}${pass.toPeri > 0 ? `, closest in ${formatDuration(pass.toPeri)}` : ''}: path bent ${(pass.turn / DEG).toFixed(0)}°`);
+        out.push(`  Gravity assist: ${formatSpeed(before)} in → ${formatSpeed(after)} out, relative to ${theName(parent)} (${after >= before ? '+' : '−'}${formatSpeed(Math.abs(after - before))})`);
+      }
+    }
+
+    // The well: a sheet through what the ship flies by, in the plane of its orbit (a
+    // planet's or a moon's), or the ecliptic.
+    if (gravityView.well && gm) {
+      const r = length(s.rel);
+      let n = icrfToScene([0, -Math.sin(OBLIQUITY_J2000), Math.cos(OBLIQUITY_J2000)]);
+      if (hasParent(s.ref)) {
+        const parent = parentOf(s.ref);
+        n = normalize(cross(sub(flightWorld.position(s.ref, tdb), flightWorld.position(parent, tdb), [0, 0, 0]), relVelocity(s.ref, parent, tdb)));
+      }
+      // Seen from above: "down" is away from the side the ship is on.
+      if (dot(n, s.rel) < 0) n = [-n[0], -n[1], -n[2]];
+      const R = surfaceOf(s.ref) || flightWorld.radius(s.ref);
+      const reach = 3 * Math.max(r, 2 * R);
+      const dents: Dent[] = [{ rel: [0, 0, 0], gm, radius: R }];
+      for (const src of s.sources) {
+        if (src.id === s.ref) continue;
+        const rel = sub(flightWorld.position(src.id, tdb), refAt, [0, 0, 0]);
+        if (length(rel) < 1.5 * reach) dents.push({ rel, gm: src.gm, radius: Math.max(surfaceOf(src.id), 1) });
+      }
+      wellGrid.update(offset(s.ref), R, n, reach, r, dents, isHole(s.ref) ? (2 * gm) / (C_KMS * C_KMS) : undefined);
+    } else {
+      wellGrid.lines.visible = false;
+    }
+
+    // What the crew feels: the engines' push (or nothing at all in free fall), and tides.
+    const felt = length(s.felt) / G0;
+    hud.strain(Math.min(0.85, Math.max(0, (felt - 4) / 25)));
+    const tide = stretch(s.tides);
+    const body2m = (tide.along * 2) / 9.80665; // g, head to toe
+    const level = body2m > 10 ? 3 : body2m > 1 ? 2 : body2m > 0.05 ? 1 : 0;
+    const words = ['', ', you feel it', ', painful', ', deadly'][level];
+    out.push(`${felt > 1e-3 ? `Feeling ${felt < 0.1 ? felt.toPrecision(2) : felt < 10 ? felt.toFixed(2) : Math.round(felt).toLocaleString('en-US')} g from the engines` : 'Weightless in free fall'} · tides ${formatTiny(body2m)} g head to toe${words}`);
+    if (level > tideLevel) {
+      const who = nameOf(s.strongest) || 'it';
+      hud.say(['', `The tides of ${who} tug at your head and feet differently now`, `The tides of ${who} hurt: ${body2m.toFixed(1)} g more at your feet than your head`, `Spaghettification: the tides of ${who} would tear a person apart here`][level], 8);
+    }
+    tideLevel = level;
+    // The gauge: the stretch as it lies on screen, exaggerated on a log scale.
+    camSpace.set(tide.axis[0], tide.axis[1], tide.axis[2]).transformDirection(camera.matrixWorldInverse);
+    const onScreen = Math.hypot(camSpace.x, camSpace.y);
+    const strength = Math.min(1, Math.max(0, (Math.log10(Math.max(body2m, 1e-14)) + 10) / 11));
+    hud.tides(Math.atan2(camSpace.y, camSpace.x), 1 + 0.9 * strength * onScreen, `Tides ${formatTiny(body2m)} g`);
+    gravityLines = out;
+  };
+
   const updateRocketHud = (s: Ship, eye: Vec3) => {
     const out: string[] = [];
     const b = length(s.vel) / C_KMS;
@@ -2217,6 +2507,7 @@ async function main() {
         const ms2 = g * 1000;
         out.push(`Gravity ${ms2 >= 0.01 ? ms2.toFixed(ms2 < 10 ? 2 : 1) : ms2.toExponential(1)} m/s² (${(g / G0).toPrecision(2)} g), mostly ${nameOf(s.strongest)}`);
       }
+      out.push(...gravityLines);
       out.push(`Engines ${s.power < 1 ? s.power.toPrecision(2) : Math.round(s.power).toLocaleString('en-US')} g · flight assist ${s.assist ? 'on' : 'off'}`);
       if (clock.paused) out.push('Time is paused: the engines need it running');
     }
@@ -2751,6 +3042,7 @@ async function main() {
     lastView.up = [...viewUp];
     camera.updateProjectionMatrix();
     camera.updateMatrixWorld();
+    updateGravityView(ship, now);
     // The ship's velocity, for the relativistic sky (stars, galaxies, glow, background).
     beta[0] = beta[1] = beta[2] = 0;
     if (ship && !ship.warp.on) for (let k = 0; k < 3; k++) beta[k] = ship.vel[k] / C_KMS;
@@ -3360,6 +3652,18 @@ function waitFor(condition: () => boolean, timeoutMs: number): Promise<void> {
 const dot = (a: Vec3, b: Vec3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 const add = (a: Vec3, b: Vec3): Vec3 => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
 const cross = (a: Vec3, b: Vec3): Vec3 => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+const scale = (a: Vec3, k: number): Vec3 => [a[0] * k, a[1] * k, a[2] * k];
+const normalize = (a: Vec3): Vec3 => {
+  const l = Math.hypot(a[0], a[1], a[2]) || 1;
+  return [a[0] / l, a[1] / l, a[2] / l];
+};
+/** A small or large number, readably: 0.012, 3.4e-7, 1,200. */
+function formatTiny(x: number): string {
+  if (x === 0) return '0';
+  if (x >= 1000) return Math.round(x).toLocaleString('en-US');
+  if (x >= 0.01) return x.toPrecision(2);
+  return x.toExponential(1).replace('e-', '×10⁻').replace(/⁻(\d+)/, (_, d: string) => '⁻' + [...d].map((c) => '⁰¹²³⁴⁵⁶⁷⁸⁹'[Number(c)]).join(''));
+}
 
 function smoothstep(a: number, b: number, x: number): number {
   const t = Math.min(1, Math.max(0, (x - a) / (b - a)));

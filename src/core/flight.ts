@@ -73,6 +73,8 @@ export type ShipEvent =
 /** A quaternion [x, y, z, w]: ship axes (x right, y up, -z forward) to scene axes. */
 export type Quat = [number, number, number, number];
 
+const IDLE: ShipInput = { thrust: [0, 0, 0], turn: [0, 0, 0], boost: false, warp: 0 };
+
 /** Seconds for flight assist to null drift and spin. */
 const FA_TIME = 1.2;
 const SPIN_TIME = 0.12;
@@ -107,6 +109,21 @@ export class Ship {
   /** Gravitational field at the ship (km/s^2) and the strongest source, after the last step. */
   gravity: Vec3 = [0, 0, 0];
   strongest = -1;
+  /**
+   * Tidal tensor at the ship after the last step (1/s^2, scene axes: xx, yy, zz, xy, xz,
+   * yz): how much harder the field pulls one end of something than the other, per km.
+   */
+  tides: number[] = [0, 0, 0, 0, 0, 0];
+  /**
+   * The engines' push (km/s^2, scene axes, as the crew measures it) in the last step:
+   * what they feel in flight. Gravity alone is never felt: in free fall everything
+   * falls together.
+   */
+  felt: Vec3 = [0, 0, 0];
+  /** Gravity relative to the reference object (km/s^2): what the ground pushes back against once landed. */
+  pull: Vec3 = [0, 0, 0];
+  /** Gravity sources used in the last step. */
+  sources: Source[] = [];
   /** Warp speed limit (km/s) and the object that sets it, after the last warp step. */
   warpCap = Infinity;
   warpLimiter = -1;
@@ -217,16 +234,34 @@ export class Ship {
     }
     if (dt === 0) return events;
     const sources = world.sources(this.position(world, tdb), tdb);
-    // Substeps short against the fastest orbit around anything nearby.
+    this.sources = sources;
+    const n = Math.min(400, Math.max(1, Math.ceil(Math.abs(dt) / this.maxStep(world, sources, tdb))));
+    const h = dt / n;
+    for (let i = 0; i < n && !events.some((e) => e.kind === 'horizon'); i++) this.substep(world, sources, tdb + i * h, h, input, events);
+    return events;
+  }
+
+  /** The longest step (s) that follows the fastest orbit around anything nearby. */
+  maxStep(world: FlightWorld, sources: Source[], tdb: number): number {
     let hMax = Infinity;
     for (const s of sources) {
       const p = world.position(s.id, tdb);
       const r = Math.max(world.radius(s.id), Math.hypot(...relTo(world, this, p, tdb)));
       hMax = Math.min(hMax, 0.02 * Math.sqrt((r * r * r) / s.gm));
     }
-    const n = Math.min(400, Math.max(1, Math.ceil(Math.abs(dt) / hMax)));
-    const h = dt / n;
-    for (let i = 0; i < n && !events.some((e) => e.kind === 'horizon'); i++) this.substep(world, sources, tdb + i * h, h, input, events);
+    return hMax;
+  }
+
+  /**
+   * One step of `h` seconds with the engines off and the given sources (the forecast's
+   * ghost ship: the same physics as `step`, so its path is the one the ship would fly).
+   */
+  coast(world: FlightWorld, sources: Source[], tdb: number, h: number): ShipEvent[] {
+    const events: ShipEvent[] = [];
+    const assist = this.assist;
+    this.assist = false;
+    this.substep(world, sources, tdb, h, IDLE, events);
+    this.assist = assist;
     return events;
   }
 
@@ -238,6 +273,8 @@ export class Ship {
     const ref = world.position(this.ref, tdb);
     let best = 0;
     this.strongest = -1;
+    const T = this.tides;
+    T.fill(0);
     for (const s of sources) {
       const p = world.position(s.id, tdb);
       const d: Vec3 = [p[0] - ref[0] - this.rel[0], p[1] - ref[1] - this.rel[1], p[2] - ref[2] - this.rel[2]];
@@ -254,6 +291,8 @@ export class Ship {
           this.strongest = s.id;
         }
         for (let k = 0; k < 3; k++) out[k] += a[k];
+        // (Its tides as from a point of the same mass: lumps matter only at its surface.)
+        addTides(T, s.gm / (r * r), r, r, d);
         continue;
       }
       // Paczyński–Wiita near a black hole: Newtonian far out, unbounded at r = 2GM/c^2.
@@ -264,10 +303,12 @@ export class Ship {
         this.strongest = s.id;
       }
       for (let k = 0; k < 3; k++) out[k] += (g * d[k]) / r;
+      addTides(T, g, r, r0, d);
     }
     this.gravity = [out[0], out[1], out[2]];
     const aRef = world.acceleration(this.ref, tdb);
     for (let k = 0; k < 3; k++) out[k] -= aRef[k];
+    this.pull = [out[0], out[1], out[2]];
     return out;
   }
 
@@ -300,6 +341,8 @@ export class Ship {
       }
       for (let c = 0; c < 3; c++) out[c] += a * axes[k][c];
     }
+    // The crew feels the push itself (proper acceleration), whatever it does to the speed.
+    this.felt = [out[0], out[1], out[2]];
     // Special relativity: the same push changes the speed less as it nears c.
     const v = length(this.vel);
     if (v > 1e-3 * C_KMS) {
@@ -417,6 +460,18 @@ export class Ship {
 function relTo(world: FlightWorld, ship: Ship, p: Vec3, tdb: number): Vec3 {
   const ref = world.position(ship.ref, tdb);
   return [p[0] - ref[0] - ship.rel[0], p[1] - ref[1] - ship.rel[1], p[2] - ref[2] - ship.rel[2]];
+}
+
+/**
+ * Add one source's tides to the tensor T: a pull `g` from `d` away (distance r, r0 for
+ * the potential's own radius) stretches along the line to it (dg/dr = 2g/r0) and
+ * squeezes across it (g/r).
+ */
+function addTides(T: number[], g: number, r: number, r0: number, d: Vec3): void {
+  const across = -g / r, along = (2 * g) / Math.max(r0, 1e-3), x = d[0] / r, y = d[1] / r, z = d[2] / r;
+  const k = along - across;
+  T[0] += across + k * x * x; T[1] += across + k * y * y; T[2] += across + k * z * z;
+  T[3] += k * x * y; T[4] += k * x * z; T[5] += k * y * z;
 }
 
 function limitSpeed(v: Vec3): void {
