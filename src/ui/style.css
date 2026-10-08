@@ -95,6 +95,18 @@ html, body { margin: 0; height: 100%; background: #000; color: var(--ink); font:
 .flight-mark.target { padding-left: 20px; white-space: nowrap; transform: translate(-9px, -50%); }
 .flight-mark.target::before { content: ''; position: absolute; left: 2px; top: 50%; width: 12px; height: 12px; border: 1.5px solid currentColor; transform: translateY(-50%) rotate(45deg); }
 .flight-mark.target.edge { opacity: 0.8; }
+.flight-mark.closest, .flight-mark.encounter, .flight-mark.impact { padding-left: 14px; white-space: nowrap; transform: translate(-5px, -50%); text-shadow: 0 1px 3px #000; }
+.flight-mark.closest { color: #7fd8ff; }
+.flight-mark.encounter { color: #ffb15c; }
+.flight-mark.impact { color: #ff6b5c; }
+.flight-mark.closest::before, .flight-mark.encounter::before, .flight-mark.impact::before { content: ''; position: absolute; left: 0; top: 50%; width: 8px; height: 8px; margin-top: -4px; border-radius: 50%; background: currentColor; }
+.flight-mark.impact::before { border-radius: 0; transform: rotate(45deg); }
+.flight-tides { float: right; width: 72px; margin: 0 0 4px 10px; text-align: center; font-size: 10px; line-height: 1.25; color: var(--quiet); }
+.flight-tides[hidden] { display: none; }
+.flight-tides svg { width: 60px; height: 60px; display: block; margin: 0 auto; }
+.flight-tides .rest { fill: none; stroke: rgba(232, 236, 242, 0.18); stroke-dasharray: 2 2; }
+.flight-tides svg circle:not(.rest) { fill: #ffb15c; }
+.g-vignette { position: fixed; inset: 0; pointer-events: none; opacity: 0; background: radial-gradient(ellipse at center, transparent 45%, rgba(0, 0, 0, 0.92) 100%); transition: opacity 0.25s; }
 body.flying #view { cursor: crosshair; }
 #flight-pad, #walk-pad { position: fixed; left: 8px; right: 8px; bottom: 120px; display: flex; justify-content: space-between; pointer-events: none; }
 .pad-group { display: grid; grid-template-columns: repeat(2, 64px); gap: 6px; pointer-events: auto; }
