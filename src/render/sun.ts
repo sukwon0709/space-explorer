@@ -2,7 +2,9 @@ import * as THREE from 'three';
 import type { Vec3 } from '../core/ephemeris';
 import type { Mat3 } from '../core/orientation';
 import { MAP_GLSL } from './planets';
-import { latLonSphere } from './sky';
+import { applySphereLod, sphereLevels } from './lod';
+
+const spheres = sphereLevels(128, 64);
 
 /**
  * The Sun: the photosphere from an SDO/HMI image (sunspots and faculae, see
@@ -111,7 +113,7 @@ export class SunView {
         uBrightness: { value: 1 },
       },
     });
-    this.sphere = new THREE.Mesh(latLonSphere(128, 64), this.material);
+    this.sphere = new THREE.Mesh(spheres[0], this.material);
     this.sphere.scale.setScalar(radius);
     this.group.add(this.sphere);
 
@@ -143,6 +145,7 @@ export class SunView {
   update(rel: Vec3, bodyToScene: Mat3, visible: number, exposure: number, sky: number): void {
     const b = bodyToScene;
     this.group.position.set(rel[0], rel[1], rel[2]);
+    applySphereLod(this.sphere, spheres, 128, this.radius, Math.hypot(rel[0], rel[1], rel[2]), 1.5);
     this.m4.set(b[0], b[1], b[2], 0, b[3], b[4], b[5], 0, b[6], b[7], b[8], 0, 0, 0, 0, 1);
     this.sphere.quaternion.setFromRotationMatrix(this.m4);
     this.material.uniforms.uSceneToBody.value.set(b[0], b[3], b[6], b[1], b[4], b[7], b[2], b[5], b[8]);

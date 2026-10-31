@@ -2,36 +2,9 @@ import * as THREE from 'three';
 import type { Vec3 } from '../core/ephemeris';
 import type { Globe, GlobeFrame } from './globe';
 import { ATMOSPHERE, atmosphereGlsl } from './atmosphere';
+import { applySphereLod, latLonSphere, sphereLevels } from './lod';
 
-/**
- * A latitude/longitude grid on the unit sphere in body-fixed axes (z = north pole),
- * with uv = ((lon + 180) / 360, (90 - lat) / 180) to match equirectangular maps.
- */
-export function latLonSphere(segLon: number, segLat: number): THREE.BufferGeometry {
-  const positions: number[] = [];
-  const uvs: number[] = [];
-  const indices: number[] = [];
-  for (let j = 0; j <= segLat; j++) {
-    const lat = Math.PI / 2 - (Math.PI * j) / segLat;
-    for (let i = 0; i <= segLon; i++) {
-      const lon = -Math.PI + (2 * Math.PI * i) / segLon;
-      positions.push(Math.cos(lat) * Math.cos(lon), Math.cos(lat) * Math.sin(lon), Math.sin(lat));
-      uvs.push(i / segLon, j / segLat);
-    }
-  }
-  for (let j = 0; j < segLat; j++) {
-    for (let i = 0; i < segLon; i++) {
-      const a = j * (segLon + 1) + i, b = a + 1, c = a + segLon + 1, d = c + 1;
-      indices.push(a, c, b, b, c, d);
-    }
-  }
-  const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-  g.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
-  g.setIndex(indices);
-  g.computeBoundingSphere();
-  return g;
-}
+export { latLonSphere };
 
 const shellVertex = /* glsl */ `
 varying vec3 vRel;
@@ -124,7 +97,7 @@ export class EarthSky {
     const glsl = atmosphereGlsl(atmosphere);
     const top = atmosphere.top;
     this.shell = new THREE.Mesh(
-      latLonSphere(128, 64),
+      sphereLevels(128, 64)[0],
       new THREE.ShaderMaterial({
         vertexShader: shellVertex,
         fragmentShader: skyFragment(glsl),
@@ -149,7 +122,7 @@ export class EarthSky {
       const a = globe.shape.a + cloudAltitude;
       const b = globe.shape.b + cloudAltitude;
       this.clouds = new THREE.Mesh(
-        latLonSphere(512, 256),
+        sphereLevels(512, 256)[0],
         new THREE.ShaderMaterial({
           vertexShader: shellVertex,
           fragmentShader: cloudFragment(glsl),
@@ -178,6 +151,9 @@ export class EarthSky {
       mesh.position.set(f.centerRel[0], f.centerRel[1], f.centerRel[2]);
       mesh.quaternion.copy(this.quaternion);
       mesh.scale.set(r[0], r[1], r[2]);
+      // The sky shell gets a coarser grid from afar (see lod.ts). The cloud deck keeps its
+      // full grid: a coarser one sags below the highest terrain (Tibet) and is hidden there.
+      if (mesh === this.shell) applySphereLod(mesh, sphereLevels(128, 64), 128, Math.max(r[0], r[2]), Math.hypot(f.centerRel[0], f.centerRel[1], f.centerRel[2]), 2);
     }
   }
 }

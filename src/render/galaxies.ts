@@ -45,15 +45,20 @@ vec3 relative() { return (position - uCamHigh) - uCamLow; }
 // ship moving near light speed (Doppler factor D), its light is that of a blackbody at
 // D times its colour temperature: this is the gain in surface brightness (a point also
 // shrinks by D in each direction, which the caller applies).
-float galaxyFlux(float d, float D, out vec3 color) {
-  float av = 3.1 * ebv * 0.01 * uExtBlend;
-  float m = (absMag * 0.1 - 26.0) + 5.0 * log2(d * 1e5) * 0.30102999566 + av;
+float galaxyAv() { return 3.1 * ebv * 0.01 * uExtBlend; }
+// Ballesteros (2012): B-V to a blackbody temperature.
+float galaxyTeff() {
   float bv = colour / 200.0;
-  // Ballesteros (2012): B-V to a blackbody temperature.
-  float teff = 4600.0 * (1.0 / (0.92 * bv + 1.7) + 1.0 / (0.92 * bv + 0.62));
-  vec3 c = kelvinToRgb(teff * D) * exp2(-1.3287712 * av * (vec3(${REDDENING.join(', ')}) - 1.0));
-  color = c / dot(c, vec3(0.2126, 0.7152, 0.0722));
-  return exp2(-1.3287712 * (m - uMsat)) * uBrightness * surfaceGainV(D, teff);
+  return 4600.0 * (1.0 / (0.92 * bv + 1.7) + 1.0 / (0.92 * bv + 0.62));
+}
+float galaxyFlux(float d, float D) {
+  float m = (absMag * 0.1 - 26.0) + 5.0 * log2(d * 1e5) * 0.30102999566 + galaxyAv();
+  return exp2(-1.3287712 * (m - uMsat)) * uBrightness * surfaceGainV(D, galaxyTeff());
+}
+// Its colour (kept apart so galaxies too faint to draw skip it).
+vec3 galaxyColor(float D) {
+  vec3 c = kelvinToRgb(galaxyTeff() * D) * exp2(-1.3287712 * galaxyAv() * (vec3(${REDDENING.join(', ')}) - 1.0));
+  return c / dot(c, vec3(0.2126, 0.7152, 0.0722));
 }
 
 // Scale radius (Mpc) and its size on screen in device pixels.
@@ -77,11 +82,10 @@ void main() {
   float d = length(rel);
   vec4 view = modelViewMatrix * vec4(uIcrfToScene * (rel / max(d, 1e-30)), 0.0);
   float D = dopplerRest(normalize(view.xyz));
-  vec3 color;
-  float flux = galaxyFlux(d, D, color) / (D * D);
   float hPx = scaleRadius() / d * uPixelsPerRadian * uPixelRatio / D;
   // Resolved galaxies are drawn as discs instead (render the same light).
   float point = 1.0 - smoothstep(0.6, 1.6, hPx);
+  float flux = point > 0.0 ? galaxyFlux(d, D) / (D * D) : 0.0;
   float peak = min(flux, 1.0) * point;
   if (peak < 1.0 / 1600.0 || d < 1e-9) {
     gl_PointSize = 0.0;
@@ -92,7 +96,7 @@ void main() {
   gl_Position = projectionMatrix * vec4(view.xyz, 1.0);
   gl_Position.z = gl_Position.w * 0.999999;
   float sigma = uSigma * uPixelRatio * min(pow(max(flux * point * 33.0, 1.0), 0.3), 8.0);
-  vColor = color;
+  vColor = galaxyColor(D);
   vPeak = peak;
   vSigma = sigma;
   vSize = min(2.0 * ceil(3.0 * sigma) + 1.0, 255.0);
@@ -126,19 +130,25 @@ void main() {
   float d = length(rel);
   vec4 centre = modelViewMatrix * vec4(uIcrfToScene * (rel / d), 0.0);
   float D = dopplerRest(normalize(centre.xyz));
-  vec3 color;
-  // The disc keeps its surface brightness gain; its area shrinks by D^2 as it is drawn.
-  float flux = galaxyFlux(d, D, color);
   float h = scaleRadius();
   float hPx0 = h / d * uPixelsPerRadian * uPixelRatio;
   float hPx = hPx0 / D;
   float disc = smoothstep(0.6, 1.6, hPx);
   bool spheroid = mod(floor(flags / ${FLAG_SPHEROID.toFixed(1)}), 2.0) > 0.5;
   bool image = mod(floor(flags / ${FLAG_IMAGE.toFixed(1)}), 2.0) > 0.5;
-  if (disc * flux < 1e-4 || image || flags >= 128.0) {
+  // Nearly every galaxy is a point from any one place: those leave before the light
+  // and shape are worked out.
+  if (disc == 0.0 || image || flags >= 128.0) {
     gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
     return;
   }
+  // The disc keeps its surface brightness gain; its area shrinks by D^2 as it is drawn.
+  float flux = galaxyFlux(d, D);
+  if (disc * flux < 1e-4) {
+    gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+    return;
+  }
+  vec3 color = galaxyColor(D);
   // The galaxy's axes from where Earth sees it: position angle east of north, and the
   // inclination from the axis ratio (an oblate disc with intrinsic thickness 0.2).
   vec3 s = normalize(position);
@@ -211,7 +221,8 @@ export class GalaxyLayer {
   readonly uniforms: Record<string, THREE.IUniform>;
   private readonly pointMaterial: THREE.ShaderMaterial;
   private readonly discMaterial: THREE.ShaderMaterial;
-  private readonly flagAttributes: THREE.BufferAttribute[][] = [];
+  private readonly pointFlags: THREE.BufferAttribute[] = [];
+  private readonly discBlocks: DiscBlock[] = [];
 
   constructor(pixelRatio: number) {
     const icrfToScene = new THREE.Matrix3();
@@ -235,26 +246,37 @@ export class GalaxyLayer {
     this.group.renderOrder = -12;
   }
 
-  /** Add a block of galaxies (both as points and as discs). */
+  /** Add a block of galaxies (as points, and as discs once resolved). */
   add(block: GalaxyBlock): void {
     const points = new THREE.BufferGeometry();
     points.setAttribute('position', new THREE.BufferAttribute(block.position, 3));
+    for (const name of ATTRIBUTES) points.setAttribute(name, new THREE.BufferAttribute(block[name], 1));
+    this.pointFlags.push(points.getAttribute('flags') as THREE.BufferAttribute);
+    const pointObject = new THREE.Points(points, this.pointMaterial);
+    pointObject.frustumCulled = false;
+    pointObject.renderOrder = -12;
+    this.group.add(pointObject);
+
+    // The disc pass draws only the galaxies that could be resolved from near here, copied
+    // into their own instance buffers: nearly all of a block's galaxies are points from
+    // any one place, and each would otherwise still run the disc vertex shader.
     const discs = new THREE.InstancedBufferGeometry();
     discs.setAttribute('corner', new THREE.BufferAttribute(new Float32Array([-1, -1, 1, -1, 1, 1, -1, 1]), 2));
     discs.setIndex([0, 1, 2, 0, 2, 3]);
-    discs.setAttribute('position', new THREE.InstancedBufferAttribute(block.position, 3));
-    discs.instanceCount = block.count;
-    for (const name of ATTRIBUTES) {
-      points.setAttribute(name, new THREE.BufferAttribute(block[name], 1));
-      discs.setAttribute(name, new THREE.InstancedBufferAttribute(block[name], 1));
-    }
-    this.flagAttributes.push([points.getAttribute('flags') as THREE.BufferAttribute, discs.getAttribute('flags') as THREE.BufferAttribute]);
-    for (const [g, m] of [[points, this.pointMaterial], [discs, this.discMaterial]] as const) {
-      const object = g instanceof THREE.InstancedBufferGeometry ? new THREE.Mesh(g, m) : new THREE.Points(g, m);
-      object.frustumCulled = false;
-      object.renderOrder = -12;
-      this.group.add(object);
-    }
+    const attrs: Record<string, THREE.InstancedBufferAttribute> = {
+      position: new THREE.InstancedBufferAttribute(new Float32Array(block.count * 3), 3),
+    };
+    for (const name of ATTRIBUTES) attrs[name] = new THREE.InstancedBufferAttribute(new Uint8Array(block.count), 1);
+    for (const [name, a] of Object.entries(attrs)) discs.setAttribute(name, a.setUsage(THREE.DynamicDrawUsage));
+    discs.instanceCount = 0;
+    const mesh = new THREE.Mesh(discs, this.discMaterial);
+    mesh.frustumCulled = false;
+    mesh.renderOrder = -12;
+    mesh.visible = false;
+    this.group.add(mesh);
+    const h = new Float32Array(block.count);
+    for (let i = 0; i < block.count; i++) h[i] = scaleRadius(block.radius[i]);
+    this.discBlocks.push({ block, mesh, attrs, h, at: undefined, px: 0, safe: 0, all: false, dirty: true });
   }
 
   /**
@@ -263,7 +285,8 @@ export class GalaxyLayer {
    */
   markImage(block: GalaxyBlock, k: number, i: number): void {
     block.flags[i] |= FLAG_IMAGE;
-    for (const a of this.flagAttributes[k] ?? []) a.needsUpdate = true;
+    if (this.pointFlags[k]) this.pointFlags[k].needsUpdate = true;
+    if (this.discBlocks[k]) this.discBlocks[k].dirty = true;
   }
 
   /**
@@ -279,7 +302,71 @@ export class GalaxyLayer {
     u.uPixelsPerRadian.value = pixelsPerRadian;
     u.uBrightness.value = brightness;
     u.uExtBlend.value = extinction;
+    const px = pixelsPerRadian * u.uPixelRatio.value;
+    // Near light speed aberration magnifies the sky behind: every galaxy is a candidate.
+    const all = relativityUniforms.uGamma.value > 1;
+    for (const b of this.discBlocks) {
+      const moved = b.at ? Math.hypot(camera[0] - b.at[0], camera[1] - b.at[1], camera[2] - b.at[2]) : Infinity;
+      if (b.dirty || all !== b.all || moved > b.safe || px > b.px) this.selectDiscs(b, camera, px, all);
+    }
   }
+
+  /**
+   * Copy the block's galaxies that could be resolved into its disc buffers. Chosen with
+   * a factor of two in pixel size to spare (at twice the zoom), so the set stays complete
+   * until the camera has moved `safe`: a fifth of the way to the nearest galaxy left out.
+   */
+  private selectDiscs(b: DiscBlock, camera: Vec3, px: number, all: boolean): void {
+    const { block, attrs } = b;
+    const p = block.position;
+    const zoom = px * 2;
+    let n = 0;
+    let nearestOut = Infinity;
+    for (let i = 0; i < block.count; i++) {
+      if (block.flags[i] >= 128 || (block.flags[i] & FLAG_IMAGE)) continue;
+      const d = Math.hypot(p[i * 3] - camera[0], p[i * 3 + 1] - camera[1], p[i * 3 + 2] - camera[2]);
+      // Resolved (in the shader) once h / d * px > 0.6; candidates up to 0.3 at twice the zoom.
+      if (!all && b.h[i] * zoom < 0.3 * d) {
+        nearestOut = Math.min(nearestOut, d);
+        continue;
+      }
+      (attrs.position.array as Float32Array).set(p.subarray(i * 3, i * 3 + 3), n * 3);
+      for (const name of ATTRIBUTES) attrs[name].array[n] = block[name][i];
+      n++;
+    }
+    for (const a of Object.values(attrs)) {
+      a.clearUpdateRanges();
+      a.addUpdateRange(0, n * a.itemSize);
+      a.needsUpdate = true;
+    }
+    (b.mesh.geometry as THREE.InstancedBufferGeometry).instanceCount = n;
+    b.mesh.visible = n > 0;
+    b.at = [camera[0], camera[1], camera[2]];
+    b.px = zoom;
+    b.safe = nearestOut * 0.2;
+    b.all = all;
+    b.dirty = false;
+  }
+}
+
+interface DiscBlock {
+  block: GalaxyBlock;
+  mesh: THREE.Mesh;
+  attrs: Record<string, THREE.InstancedBufferAttribute>;
+  /** Scale radius of each galaxy, Mpc. */
+  h: Float32Array;
+  /** Camera position (Mpc) and pixels per radian the disc set was chosen for. */
+  at: Vec3 | undefined;
+  px: number;
+  /** How far the camera can move before the set must be chosen again, Mpc. */
+  safe: number;
+  all: boolean;
+  dirty: boolean;
+}
+
+/** Scale radius (Mpc) from its code, as scaleRadius() in the shaders. */
+function scaleRadius(code: number): number {
+  return 5e-5 * 2 ** ((code / 60) * 3.321928);
 }
 
 function icrfToScene3(v: Vec3): Vec3 {

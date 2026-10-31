@@ -548,8 +548,11 @@ export class CosmicEvents {
     prepare: (camera: THREE.PerspectiveCamera, size: number) => void, restore: () => void,
   ): void {
     const view = this.lens.kerr;
-    if (view.skyStale(eye, 1e13, frame) || (this.sheet.mesh.visible && frame % 3 === 0)) {
-      view.renderSky(renderer, scene, eye, frame, prepare);
+    // The rippling sheet changes the sky every frame: two faces a frame keep it as fresh
+    // as a whole cube every third frame did, without the spikes.
+    const stale = view.skyStale(eye, 1e13, frame);
+    if (stale || this.sheet.mesh.visible) {
+      view.renderSky(renderer, scene, eye, frame, prepare, stale === 'moved' ? 6 : this.sheet.mesh.visible ? 2 : 1);
       restore();
     }
     view.renderView(renderer, scene, camera);

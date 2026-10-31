@@ -365,6 +365,8 @@ export class BlackHoleView {
   /** Camera position when the sky was last drawn (scene km), and when. */
   private skyAt: Vec3 | undefined;
   private skyFrame = -1e9;
+  /** The next face of a refresh in progress (0: none). */
+  private nextFace = 0;
   resolution = 1;
 
   constructor(skySize = 512) {
@@ -420,30 +422,45 @@ export class BlackHoleView {
     u.uMaxSteps.value = level === 'high' ? 600 : level === 'normal' ? 400 : 200;
   }
 
-  /** Does the sky cube need redrawing? (It is the same in every direction the camera turns.) */
-  skyStale(eye: Vec3, nearestKm: number, frame: number): boolean {
-    if (!this.skyAt) return true;
+  /**
+   * Does the sky cube need redrawing? (It is the same in every direction the camera
+   * turns.) 'moved': the camera has moved enough to change it, so all six faces at once;
+   * 'refresh': only a periodic refresh (for layers still streaming in), which can be
+   * spread over several frames.
+   */
+  skyStale(eye: Vec3, nearestKm: number, frame: number): 'moved' | 'refresh' | false {
+    if (!this.skyAt) return 'moved';
     const moved = Math.hypot(eye[0] - this.skyAt[0], eye[1] - this.skyAt[1], eye[2] - this.skyAt[2]);
-    return moved > nearestKm * 0.002 || frame - this.skyFrame > 30;
+    if (moved > nearestKm * 0.002) return 'moved';
+    return this.nextFace > 0 || frame - this.skyFrame > 30 ? 'refresh' : false;
   }
 
   /**
    * Draw the sky cube around the camera (at the scene origin). `prepare` is called
-   * before each face so camera-dependent layers can set up for it.
+   * before each face so camera-dependent layers can set up for it. With `faces` < 6,
+   * only that many faces are drawn this frame, continuing round the cube (a refresh
+   * of six whole-scene renders spread out instead of one frame taking seven times as long).
    */
-  renderSky(renderer: THREE.WebGLRenderer, scene: THREE.Scene, eye: Vec3, frame: number, prepare: (camera: THREE.PerspectiveCamera, size: number) => void): void {
+  renderSky(renderer: THREE.WebGLRenderer, scene: THREE.Scene, eye: Vec3, frame: number, prepare: (camera: THREE.PerspectiveCamera, size: number) => void, faces = 6): void {
     const previous = renderer.getRenderTarget();
-    this.faces.forEach((face, k) => {
+    if (faces >= 6) this.nextFace = 0;
+    for (let n = 0; n < Math.min(faces, 6); n++) {
+      const k = this.nextFace;
+      const face = this.faces[k];
       face.position.set(0, 0, 0);
       face.updateMatrixWorld();
       prepare(face, this.sky.width);
       renderer.setRenderTarget(this.sky, k);
       renderer.clear();
       renderer.render(scene, face);
-    });
+      this.nextFace = (k + 1) % 6;
+      if (this.nextFace === 0) {
+        this.skyAt = [eye[0], eye[1], eye[2]];
+        this.skyFrame = frame;
+        if (faces < 6) break;
+      }
+    }
     renderer.setRenderTarget(previous);
-    this.skyAt = [eye[0], eye[1], eye[2]];
-    this.skyFrame = frame;
   }
 
   /** Draw the scene as the camera sees it, into the view texture. */

@@ -214,6 +214,9 @@ export class MilkyWayGlow {
   private readonly rot = new THREE.Matrix3();
   /** Scale of the drawing target relative to the canvas. */
   resolution = 0.5;
+  /** Everything the last drawing depended on, at the shader's float32 precision. */
+  private readonly drawnWith = new Float32Array(23);
+  private readonly inputs = new Float32Array(23);
 
   constructor(dust?: DustGrid) {
     const empty = new THREE.Data3DTexture(new Uint8Array(1), 1, 1, 1);
@@ -291,6 +294,20 @@ export class MilkyWayGlow {
     this.ray.multiplyMatrices(this.sceneToGal, this.rot);
     this.composite.visible = scale > 0;
     if (scale <= 0) return;
+    // The ray march (96 steps a pixel) is skipped when nothing it depends on has changed
+    // since the last frame, as when the camera holds still: the target still has it.
+    const x = this.inputs;
+    x.set(this.ray.elements, 0);
+    x[9] = cameraKpc[0]; x[10] = cameraKpc[1]; x[11] = cameraKpc[2];
+    x[12] = limit; x[13] = scale; x[14] = u.uTan.value.x; x[15] = u.uTan.value.y;
+    x[16] = w; x[17] = h;
+    const beta = relativityUniforms.uBetaView.value;
+    x[18] = beta.x; x[19] = beta.y; x[20] = beta.z; x[21] = relativityUniforms.uGamma.value;
+    x[22] = square ? 1 : 0;
+    let same = true;
+    for (let k = 0; k < x.length && same; k++) same = x[k] === this.drawnWith[k];
+    if (same) return;
+    this.drawnWith.set(x);
     const previous = renderer.getRenderTarget();
     renderer.setRenderTarget(this.target);
     renderer.render(this.scene, this.camera);
