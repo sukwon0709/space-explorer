@@ -332,12 +332,89 @@ def grand_canyon_colour(data_dir: str, layer: dict):
     # Raster works in "lon/lat" units; here they are easting/northing metres.
     # TCI is reflectance stretched for display (255 at about 0.3); scale it to match the
     # Blue Marble brightness around the canyon (linear means 0.41 vs 0.10 in red).
-    rgb = utm.sample(east, north) * 0.58
+    rgb = apply_delight(utm.sample(east, north), *delight_gain(data_dir, lons, lats, step)) * 0.58
     # A fourth channel marks real Sentinel-2 pixels (TCI nodata is 0), so the
     # composite falls back to the global map wherever the scene has no data.
     valid = utm.inside(east, north) & (rgb.sum(axis=2) > 0)
     rgb = np.concatenate([np.where(valid[..., None], rgb, 0), valid[..., None].astype(np.float32)], axis=2)
     return rgb, Raster(rgb, w + step / 2, n - step / 2, step, wrap=False)
+
+
+# The Sun when Sentinel-2B took the scene (STAC view:sun_azimuth / view:sun_elevation).
+SENTINEL_SUN_AZIMUTH = 162.857
+SENTINEL_SUN_ELEVATION = 42.002
+# Clear-sky diffuse light on a horizontal surface, as a fraction of the direct beam's
+# irradiance on a surface facing the Sun (typical of dry desert air with the Sun at 40 deg).
+SKY_FRACTION = 0.12
+
+
+def delight_gain(data_dir: str, lons: np.ndarray, lats: np.ndarray, step: float):
+    """How much to brighten each pixel of the Sentinel-2 scene to take out the light and
+    shadow of the moment it was taken, so the renderer can light the ground itself.
+
+    A photograph from orbit is albedo times the lighting at that moment: slopes facing the
+    morning Sun burn white and the canyon walls facing away (and the floor in their cast
+    shadow) are near black. Lit again by the renderer, the shadows come out doubled and the
+    sunlit slopes glow like snow. The lighting is recomputed from the Copernicus DEM at the
+    scene's Sun (direct beam on each slope, cast shadows marched toward the Sun, sky light
+    by the open sky above each slope) and divided out, relative to flat open ground (which
+    keeps its brightness). The gain is capped: in deep shadow the scene holds little more
+    than noise, and DEM and image are not registered to better than a pixel or two.
+    """
+    from scipy.ndimage import gaussian_filter
+
+    west = Raster(tifffile.imread(os.path.join(data_dir, "cop30_N36_00_W113.tif")).astype(np.float32), -113.0, 37.0, 1 / 3600, wrap=False)
+    east = Raster(tifffile.imread(os.path.join(data_dir, "cop30_N36_00_W112.tif")).astype(np.float32), -112.0, 37.0, 1 / 3600, wrap=False)
+    h = np.where(lons < -112.0, west.sample(lons, lats), east.sample(lons, lats))
+    # The DEM's 30 m posts on this ~9 m grid: smooth away the bilinear facets.
+    h = gaussian_filter(h, 1.5)
+    dy = step * 111320.0
+    dx = dy * np.cos(np.radians(lats.mean()))
+    gx = np.gradient(h, axis=1) / dx  # east
+    gy = -np.gradient(h, axis=0) / dy  # north (rows run south)
+    norm = np.sqrt(gx * gx + gy * gy + 1)
+    az, el = np.radians(SENTINEL_SUN_AZIMUTH), np.radians(SENTINEL_SUN_ELEVATION)
+    sun = (np.sin(az) * np.cos(el), np.cos(az) * np.cos(el), np.sin(el))
+    direct = np.maximum((-gx * sun[0] - gy * sun[1] + sun[2]) / norm, 0)
+
+    # Cast shadows: walk toward the Sun; any ground above the ray hides it.
+    lit = np.ones(h.shape, dtype=bool)
+    rows, cols = h.shape
+    for dist in np.arange(dy, 3500.0, dy):
+        dr = int(round(-sun[1] / np.cos(el) * dist / dy))  # rows grow southward
+        dc = int(round(sun[0] / np.cos(el) * dist / dx))
+        if abs(dr) >= rows or abs(dc) >= cols:
+            break
+        shifted = np.full(h.shape, -1e9, dtype=np.float32)
+        shifted[max(0, -dr):rows - max(0, dr), max(0, -dc):cols - max(0, dc)] = h[max(0, dr):rows - max(0, -dr) or None, max(0, dc):cols - max(0, -dc) or None]
+        lit &= shifted <= h + dist * np.tan(el)
+    sky = 0.5 + 0.5 / norm
+    flat = np.sin(el) + SKY_FRACTION
+    # Lit ground: only the slope's own shading comes out (the DEM resolves slopes well).
+    # Brightening is held back: the DEM's 30 m posts round off cliffs, so a sunlit face
+    # can look turned away to it.
+    gain_lit = np.clip(flat / np.maximum(gaussian_filter(direct + SKY_FRACTION * sky, 1.0), 1e-3), 0.6, 1.25)
+    # Shadowed ground was lit by the sky alone. The DEM's shadows are softer and up to a
+    # few pixels off the image's, so the shadow gain goes where the DEM puts a shadow
+    # nearby *and* the image is dark: bright pixels the DEM wrongly shades keep their
+    # value instead of burning white.
+    gain_shadow = np.clip(flat / (SKY_FRACTION * sky), 1.0, 3.5)
+    near_shadow = np.clip(gaussian_filter((~lit | (direct < 0.05)).astype(np.float32), 4.0) * 4.0, 0.0, 1.0)
+    return gain_lit, gain_shadow, near_shadow
+
+
+def apply_delight(rgb: np.ndarray, lit: np.ndarray, shadow: np.ndarray, near: np.ndarray) -> np.ndarray:
+    """Divide the scene's own lighting out of display-stretched Sentinel-2 RGB (see delight_gain)."""
+    lum = rgb.mean(axis=-1)
+    t = np.clip((55.0 - lum) / 30.0, 0.0, 1.0)
+    w = near * t * t * (3 - 2 * t)
+    # Bright pixels are never brightened (they are sunlit whatever the DEM says).
+    lit = np.where(lum > 90.0, np.minimum(lit, 1.0), lit)
+    gain = (lit * (1 - w) + shadow * w)[..., None]
+    # In the scene's shadows the rock is a little magenta against the same rock in sun
+    # (green some 10-15% low against red and blue): put the sunlit balance back.
+    balance = 1 + (np.array([1.0, 1.15, 1.0], dtype=np.float32) - 1) * w[..., None]
+    return rgb * gain * balance
 
 
 def grand_canyon_heights(data_dir: str, layer: dict, geoid_at):

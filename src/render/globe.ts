@@ -6,6 +6,7 @@ import { buildTileGeometry, type TileGeometry } from '../core/terrainmesh';
 import { tileBounds, tileSize, type HeightTile, type TileRef, type TileStore } from '../core/tilestore';
 import { ATMOSPHERE, MARS_ATMOSPHERE, atmosphereGlsl, type AtmosphereParams } from './atmosphere';
 import { thickAirGlsl, type ThickAirParams } from './thickair';
+import { CLOUD_GLSL } from './clouds';
 
 const DEG = Math.PI / 180;
 const GRID = 65;
@@ -128,6 +129,18 @@ vec3 surfaceDetail(vec3 n, float dist, out float shade) {
 
 vec3 srgbToLinear(vec3 c) { return pow(c, vec3(2.2)); }
 
+${CLOUD_GLSL}
+// The cloud deck between a point on the ground and the Sun: how much of the direct beam
+// gets through, and how much of the sunlight arrives diffused by the cloud instead.
+void cloudShadow(vec3 p, vec3 up, float mu0, inout float tDirect, inout float tDiffuse) {
+  if (uHasClouds < 0.5) return;
+  float below = max(ATM_BOTTOM + CLOUD_ALTITUDE - length(p), 0.0);
+  vec3 q = p + uSun * below / max(mu0, 0.08);
+  float tau = cloudTau(texture2D(uClouds, cloudUv(q)).r);
+  tDirect = exp(-tau / max(mu0, 0.08));
+  tDiffuse = max(1.0 - cloudReflectance(tau) - tDirect, 0.0);
+}
+
 void main() {
   #include <logdepthbuf_fragment>
   vec3 albedo = srgbToLinear(texture2D(uDay, uDayXform.xy + vUv * uDayXform.zw).rgb) * uAlbedoScale;
@@ -155,9 +168,27 @@ void main() {
   vec3 color = albedo * sunT * mix(mu0, ls * 0.5, 0.3);
   color += albedo * vec3(0.16, 0.11, 0.075) * smoothstep(-0.2, 0.5, sunUp) * (0.6 + 0.4 * dot(n, up));
 #else
-  vec3 color = albedo * sunT * max(ndl, 0.0);
-  // Skylight: a small fraction of the sunlight, blue-tinted, fading through twilight.
-  color += albedo * vec3(0.05, 0.07, 0.11) * smoothstep(-0.15, 0.4, sunUp);
+  // Rough rock and soil (Oren-Nayar, slope spread 0.4 rad): flatter than Lambert, with
+  // some light thrown back toward the Sun, so sunlit slopes do not look like plastic.
+  float nv = max(dot(n, -viewDir), 0.0);
+  float nl = max(ndl, 0.0);
+  vec3 lp = uSun - n * ndl;
+  vec3 vp = -viewDir - n * dot(n, -viewDir);
+  float cphi = max(dot(lp, vp), 0.0) / max(length(lp) * length(vp), 1e-4);
+  float si = sqrt(max(1.0 - nl * nl, 0.0));
+  float sv = sqrt(max(1.0 - nv * nv, 0.0));
+  float rough = nl * (0.77 + 0.29 * cphi * max(si, sv) * min(si, sv) / max(max(nl, nv), 0.05));
+  // The direct beam and, under a cloud, the part of it the cloud lets through diffusely.
+  float tDirect = 1.0, tDiffuse = 0.0;
+  cloudShadow(p, up, max(sunUp, 0.0), tDirect, tDiffuse);
+  float skyView = 0.5 + 0.5 * dot(n, up);
+  vec3 color = albedo * sunT * (rough * tDirect + max(sunUp, 0.0) * tDiffuse * skyView);
+  // Skylight from the part of the sky the slope faces, blue, fading through twilight
+  // (about a seventh of the light on the ground with the Sun high in a clear sky).
+  color += albedo * vec3(0.06, 0.085, 0.13) * skyView * smoothstep(-0.15, 0.4, sunUp) * mix(1.0, 1.6, 1.0 - tDirect);
+  // Light thrown back by the sunlit ground around, onto slopes that face it: canyon
+  // walls in shadow are lit warm by the opposite walls, not left blue-black.
+  color += albedo * albedo * sunT * max(sunUp, 0.0) * tDirect * (1.0 - skyView) * 1.4;
 #endif
   color *= eclipse;
   if (vWater > 0.5) {
@@ -240,6 +271,9 @@ export class Globe {
     uAlbedoScale: { value: new THREE.Vector3(1, 1, 1) },
     uDetailMap: { value: detailMap() },
     uDetail: { value: 0 },
+    // Earth's cloud cover (set by EarthSky), for cloud shadows on the ground.
+    uClouds: { value: blankTexture() as THREE.Texture },
+    uHasClouds: { value: 0 },
   };
   private blankNight = new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1);
   pending = 0;
@@ -589,4 +623,13 @@ function detailMap(): THREE.DataTexture {
   t.needsUpdate = true;
   sharedDetail = t;
   return t;
+}
+
+let blank: THREE.DataTexture | undefined;
+function blankTexture(): THREE.DataTexture {
+  if (!blank) {
+    blank = new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1);
+    blank.needsUpdate = true;
+  }
+  return blank;
 }

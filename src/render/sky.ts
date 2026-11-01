@@ -3,6 +3,7 @@ import type { Vec3 } from '../core/ephemeris';
 import type { Globe, GlobeFrame } from './globe';
 import { ATMOSPHERE, atmosphereGlsl } from './atmosphere';
 import { applySphereLod, latLonSphere, sphereLevels } from './lod';
+import { CLOUD_GLSL } from './clouds';
 
 export { latLonSphere };
 
@@ -50,17 +51,18 @@ void main() {
 `;
 
 const cloudFragment = (atmosphere: string) => /* glsl */ `
-uniform sampler2D uClouds;
 uniform vec3 uSun;
 uniform mat3 uSceneToBody;
 uniform vec3 uCamBody;
 uniform float uFlatten;
 uniform float uSunIntensity;
+uniform vec2 uCloudTexel;
 varying vec3 vRel;
 varying vec2 vUv;
 #include <common>
 #include <logdepthbuf_pars_fragment>
 ${atmosphere}
+${CLOUD_GLSL}
 void main() {
   #include <logdepthbuf_fragment>
   float cover = texture2D(uClouds, vUv).r;
@@ -69,16 +71,31 @@ void main() {
   vec3 rel = uSceneToBody * vRel;
   vec3 p = cam + vec3(rel.xy, rel.z * uFlatten);
   vec3 up = normalize(p);
-  float ndl = dot(up, uSun);
+  vec3 viewDir = normalize(rel);
+  float tau = cloudTau(cover);
+  // Relief: deeper cloud has higher, colder tops (up to ~10 km above the thinnest), so
+  // the cover's slope tilts the top's normal and towers get a lit and a shadowed side.
+  float cosLat = max(length(up.xy), 0.05);
+  float de = texture2D(uClouds, vUv + vec2(uCloudTexel.x, 0.0)).r - texture2D(uClouds, vUv - vec2(uCloudTexel.x, 0.0)).r;
+  float dn = texture2D(uClouds, vUv - vec2(0.0, uCloudTexel.y)).r - texture2D(uClouds, vUv + vec2(0.0, uCloudTexel.y)).r;
+  float spacing = PI * ATM_BOTTOM * uCloudTexel.y; // km per texel north-south
+  vec3 east = normalize(vec3(-up.y, up.x, 0.0) + vec3(1e-6, 0.0, 0.0));
+  vec3 north = cross(up, east);
+  vec3 n = normalize(up - east * (10.0 * de / (2.0 * spacing * cosLat)) - north * (10.0 * dn / (2.0 * spacing)));
+  float ndl = dot(n, uSun);
   vec3 sunT = atmSunTransmittance(p, uSun);
-  // Thick cloud scatters sunlight in all directions: bright on the sunlit side,
-  // a little light through from above when seen from below.
-  vec3 color = sunT * (0.12 + 0.88 * max(ndl, 0.0)) * 0.75 * uSunIntensity * eclipseVisibility(uCamBody + rel);
+  // Sunlight scattered back up (two-stream reflectance of this optical depth), brighter on
+  // the sunlit side of the tops; a little light through from above when seen from below.
+  float lit = mix(max(dot(up, uSun), 0.0), max(ndl, 0.0), 0.7);
+  vec3 color = sunT * (0.12 + 0.88 * lit) * cloudReflectance(tau) * uSunIntensity * eclipseVisibility(uCamBody + rel);
   vec3 inscatter, transmittance;
   atmBetween(cam, p, uSun, inscatter, transmittance);
-  float alpha = cover * 0.92;
-  color = color * transmittance;
-  gl_FragColor = vec4(color * alpha + inscatter * uSunIntensity * alpha, alpha);
+  // What is behind shows through by the direct transmission along the line of sight;
+  // the light the cloud scatters forward is the ground's own, blurred, so half the
+  // optical depth is counted.
+  float mu = max(abs(dot(up, viewDir)), 0.05);
+  float alpha = min(1.0 - exp(-0.5 * tau / mu), 0.97);
+  gl_FragColor = vec4(color * transmittance + inscatter * uSunIntensity * alpha, alpha);
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
 }
@@ -119,6 +136,9 @@ export class EarthSky {
       clouds.flipY = false;
       clouds.colorSpace = THREE.NoColorSpace;
       clouds.anisotropy = 8;
+      // The ground under the deck gets its shadows from the same map.
+      uniforms.uClouds.value = clouds;
+      uniforms.uHasClouds.value = 1;
       const a = globe.shape.a + cloudAltitude;
       const b = globe.shape.b + cloudAltitude;
       this.clouds = new THREE.Mesh(
@@ -126,7 +146,7 @@ export class EarthSky {
         new THREE.ShaderMaterial({
           vertexShader: shellVertex,
           fragmentShader: cloudFragment(glsl),
-          uniforms: { ...uniforms, uClouds: { value: clouds } },
+          uniforms: { ...uniforms, uCloudTexel: { value: new THREE.Vector2(1 / (clouds.image as HTMLImageElement).width, 1 / (clouds.image as HTMLImageElement).height) } },
           side: THREE.DoubleSide,
           transparent: true,
           depthWrite: false,

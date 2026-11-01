@@ -161,6 +161,9 @@ function limbScale(teff: number): number {
  * Brightness is in the units sun.ts uses, so the exposure that shows the Sun's surface
  * shows any star's.
  */
+/** Brightest a star's disc is drawn (scene units, before tone mapping). */
+export const starGlobeOptions = { cap: 1.5 };
+
 export class StarGlobe {
   readonly group = new THREE.Group();
   private readonly sphere: THREE.Mesh;
@@ -213,8 +216,9 @@ export class StarGlobe {
     const u = this.material.uniforms;
     u.uColor.value.copy(starColor(look.teff));
     // Capped: a disc far brighter than the exposure would tone-map to plain white and
-    // lose its colour; the glare around it says how bright it is.
-    u.uBrightness.value = Math.min(1.5, 7 * SUN_SURFACE_BRIGHTNESS * look.surface * exposure);
+    // lose its colour; the glare around it says how bright it is. With the high dynamic
+    // range output the cap is higher: the light past white is that glare (render/glare.ts).
+    u.uBrightness.value = Math.min(starGlobeOptions.cap, 7 * SUN_SURFACE_BRIGHTNESS * look.surface * exposure);
     u.uLimb.value = look.degenerate ? 0.6 : limbScale(look.teff);
     const g = granulation(look);
     u.uFreq.value = g.freq;
