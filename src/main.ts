@@ -3350,6 +3350,7 @@ async function main() {
       const occRadius = other < 0 || !system.available(other) ? 0 : other === 301 ? 1737.4 : other === 399 ? 6371.0 : other === 401 ? 11.08 : meanRadius(other);
       u.uEclOcc.value.set(occ[0], occ[1], occ[2], occRadius);
       u.uSunIntensity.value = system.intensity(id);
+      u.uSunRadius.value = Math.asin(Math.min(1, SUN_RADIUS / len));
       const f: GlobeFrame = { eyeBody, centerRel, bodyToScene: s.bodyToScene, sunBody: [sunBody[0] / len, sunBody[1] / len, sunBody[2] / len], pixelsPerRadian: ppr, frame: frameNumber, frustum };
       s.globe.update(f);
       s.sky?.update(f);

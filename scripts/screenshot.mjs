@@ -13,6 +13,9 @@ const views = {
   'earth': `focus=Earth&t=${T}`,
   'earth-night': `focus=Earth&t=2026-10-05T22:00:00Z&lat=45&lon=10&dist=5000&heading=0&tilt=70`,
   'grand-canyon': `focus=Earth&t=2026-10-05T17:30:00Z&lat=36.075&lon=-112.13&dist=14&heading=10&tilt=28`,
+  // Terrain shadows (horizon maps): the Moon's terminator from orbit, the canyon at sunrise.
+  'moon-terminator': `focus=Moon&t=2026-10-18T12:00:00Z&lat=-42&lon=6&dist=250&heading=270&tilt=35`,
+  'grand-canyon-morning': `focus=Earth&t=2026-10-05T13:45:00Z&lat=36.075&lon=-112.11&dist=7&heading=195&tilt=12`,
   'grand-canyon-rim': `focus=Earth&t=2026-10-05T17:30:00Z&lat=36.075&lon=-112.11&dist=7&heading=195&tilt=12`,
   'iss': `focus=Earth&t=2026-10-05T04:12:00Z&lat=-1&lon=38&dist=2500&heading=20&tilt=35`,
   'satellites': `focus=Earth&t=${T}&dist=60000&tilt=25`,
