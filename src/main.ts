@@ -21,7 +21,7 @@ import { SmallBodies } from './render/smallbodies';
 import { albedoScale } from './render/planets';
 import { StarField, makeSingleStar, type DustGrid } from './render/stars';
 import { Constellations, type ConstellationData } from './render/constellations';
-import { StarGlobe } from './render/starglobe';
+import { StarGlobe, starGlobeOptions } from './render/starglobe';
 import { CATALOGUE_PRECISION, Systems } from './systems';
 import type { SystemsData } from './core/systems';
 import { SUN_SURFACE_BRIGHTNESS } from './render/sun';
@@ -71,6 +71,7 @@ import manifest from './generated/tiles.json';
 import cloudsMeta from './generated/clouds.json';
 import mapsMeta from './generated/maps.json';
 import sunMeta from './generated/sun.json';
+import { GlareOutput, installGlareToneMapping } from './render/glare';
 
 const DEG = Math.PI / 180;
 const BASE = import.meta.env.BASE_URL;
@@ -248,6 +249,17 @@ async function main() {
   renderer.setPixelRatio(pixelRatio);
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.1;
+  // High dynamic range: light brighter than white is kept and scattered as glare, as the
+  // eye does (render/glare.ts). ?hdr=0 draws straight to the screen as before.
+  const glareOutput = params.get('hdr') === '0' ? undefined : new GlareOutput(4);
+  if (glareOutput) {
+    installGlareToneMapping();
+    renderer.toneMapping = THREE.CustomToneMapping;
+    starGlobeOptions.cap = 40;
+  }
+  // A star's surface up close: the centre of the disc a little past white, so it glows
+  // and its glare spreads past the limb while the darker limb keeps its colour and detail.
+  const starFace = glareOutput ? 2 : 0.6;
 
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(50, 1, 1e-5, 1e13);
@@ -3465,13 +3477,13 @@ async function main() {
     // In the ship, the light where the ship is; the Sun's surface only from close by.
     const fromSun = length(sub(ship ? eye : positionOf(rig.focus), sunPos, [0, 0, 0]));
     const sunUpClose = rig.focus === 10 && (!ship || rig.distance < 30 * SUN_RADIUS);
-    let exposureTarget = sunUpClose ? 0.6 / (7 * 46200) : Math.min(2500, Math.max(0.15, (fromSun / AU) ** 2));
+    let exposureTarget = sunUpClose ? starFace / (7 * 46200) : Math.min(2500, Math.max(0.15, (fromSun / AU) ** 2));
     // Another star's surface, shown like the Sun's; in its system, the light of its stars
     // where the eye is (or on the planet in view).
     const sysFocus = sys.systemOf(rig.focus);
     const near30 = rig.distance < 30 * focus.radius;
     if ((isStar(rig.focus) || (isSys(rig.focus) && !sys.isPlanet(rig.focus))) && near30) {
-      exposureTarget = 0.6 / (7 * SUN_SURFACE_BRIGHTNESS * sys.starLook(rig.focus).surface);
+      exposureTarget = starFace / (7 * SUN_SURFACE_BRIGHTNESS * sys.starLook(rig.focus).surface);
     } else if (sysFocus >= 0 && sys.active >= 0) {
       const onPlanet = sys.isPlanet(rig.focus) && near30;
       exposureTarget = Math.min(2500, Math.max(1e-5, 1 / sys.fluxAt(sysFocus, onPlanet ? positionOf(rig.focus) : eye, clock.tdb)));
@@ -3537,6 +3549,7 @@ async function main() {
     smallBodies?.update(clock.tdb / 86400, sunPos, eye, Math.max(smoothstep(2e6, 2e7, rig.distance), rig.focus >= ASTEROID_ID && rig.focus < STAR_ID ? 1 : 0));
 
     renderStart = performance.now();
+    glareOutput?.begin(renderer);
     if (holeRel && bhs.active(rig.focus, length(holeRel), ppr)) {
       // Lensing: the scene drawn into a view texture and a cube map around the camera,
       // then each pixel's ray traced back through the hole's spacetime.
@@ -3563,6 +3576,7 @@ async function main() {
       };
       cosmic.draw(renderer, scene, camera, eye, cosmicRel, frameNumber, (face, size) => setup(face, size / 2, size), () => setup(camera, ppr));
     } else renderer.render(scene, camera);
+    glareOutput?.end(renderer, ppr * pixelRatio);
     if (perf) {
       // A readback waits for the GPU, so the render time includes the drawing itself.
       const gl = renderer.getContext();

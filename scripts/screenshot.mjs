@@ -196,6 +196,8 @@ const views = {
   'gw150914-ringdown': `cosmic=gw150914&at=0.004&dist=2500&pitch=0.3&quality=low`,
 };
 const only = process.argv[3]?.split(',');
+// EXTRA="hdr=0" adds parameters to every view (to compare settings).
+const extra = process.env.EXTRA ? `&${process.env.EXTRA}` : '';
 
 const server = await createServer({ server: { port: 5199 }, logLevel: 'error' });
 await server.listen();
@@ -208,7 +210,7 @@ page.on('pageerror', (e) => console.error('page error:', e.message));
 page.on('console', (m) => { if (m.type() === 'error' || m.type() === 'warning') console.error('console:', m.text().slice(0, 300)); });
 for (const [name, query] of Object.entries(views)) {
   if (only && !only.includes(name)) continue;
-  await page.goto(`http://localhost:5199/?${query}&rate=0&capture`, { timeout: 180000 });
+  await page.goto(`http://localhost:5199/?${query}&rate=0&capture${extra}`, { timeout: 180000 });
   await page.waitForSelector('body[data-ready="true"]', { timeout: 60000 });
   // Let the terrain stream in: wait until no tiles are loading for a moment.
   for (let quiet = 0, t = 0; quiet < 3 && t < 120; t++) {
