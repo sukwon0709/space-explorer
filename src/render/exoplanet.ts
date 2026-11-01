@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import type { Vec3 } from '../core/ephemeris';
 import type { PlanetInfo, PlanetKind } from '../core/systems';
 import { SUN_SURFACE_BRIGHTNESS } from './sun';
-import { latLonSphere } from './sky';
+import { applySphereLod, sphereLevels } from './lod';
 
 /**
  * An exoplanet up close. Nobody has seen one as more than a point, so its look is an
@@ -212,7 +212,8 @@ export interface PlanetLight {
   color: THREE.Color;
 }
 
-const sphere = latLonSphere(160, 80);
+const SEG = 160;
+const spheres = sphereLevels(SEG, SEG / 2);
 
 export class ExoplanetGlobe {
   readonly mesh: THREE.Mesh;
@@ -240,7 +241,7 @@ export class ExoplanetGlobe {
         uSceneToBody: { value: new THREE.Matrix3() },
       },
     });
-    this.mesh = new THREE.Mesh(sphere, this.material);
+    this.mesh = new THREE.Mesh(spheres[0], this.material);
     this.mesh.visible = false;
     this.mesh.frustumCulled = false;
   }
@@ -271,6 +272,7 @@ export class ExoplanetGlobe {
     this.mesh.visible = true;
     this.mesh.position.set(rel[0], rel[1], rel[2]);
     this.mesh.scale.setScalar(info.radius * 6371.0);
+    applySphereLod(this.mesh, spheres, SEG, info.radius * 6371.0, Math.hypot(rel[0], rel[1], rel[2]), 1.5);
     const b = bodyToScene;
     const toBody = (v: Vec3, out: THREE.Vector3) => out.set(
       b[0] * v[0] + b[3] * v[1] + b[6] * v[2],

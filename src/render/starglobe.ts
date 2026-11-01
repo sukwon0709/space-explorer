@@ -2,7 +2,9 @@ import * as THREE from 'three';
 import type { Vec3 } from '../core/ephemeris';
 import { kelvinToRgb } from '../core/stars';
 import { SUN_SURFACE_BRIGHTNESS } from './sun';
-import { latLonSphere } from './sky';
+import { applySphereLod, sphereLevels } from './lod';
+
+const spheres = sphereLevels(128, 64);
 
 const vertexShader = /* glsl */ `
 uniform mat3 uSceneToBody;
@@ -185,7 +187,7 @@ export class StarGlobe {
       },
       extensions: { derivatives: true } as never,
     });
-    this.sphere = new THREE.Mesh(latLonSphere(128, 64), this.material);
+    this.sphere = new THREE.Mesh(spheres[0], this.material);
     this.glowMaterial = new THREE.SpriteMaterial({ map: glowTexture(), blending: THREE.AdditiveBlending, depthWrite: false, transparent: true });
     this.glow = new THREE.Sprite(this.glowMaterial);
     this.glow.renderOrder = 1;
@@ -207,6 +209,7 @@ export class StarGlobe {
     this.group.visible = true;
     this.group.position.set(rel[0], rel[1], rel[2]);
     this.sphere.scale.setScalar(look.radius);
+    applySphereLod(this.sphere, spheres, 128, look.radius, Math.hypot(rel[0], rel[1], rel[2]), 1.5);
     const u = this.material.uniforms;
     u.uColor.value.copy(starColor(look.teff));
     // Capped: a disc far brighter than the exposure would tone-map to plain white and

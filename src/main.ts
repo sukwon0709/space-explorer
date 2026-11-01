@@ -13,6 +13,7 @@ import { AU, SUN_RADIUS, SolarSystem, lockedFrame } from './render/world';
 import { CameraRig, SCENE_BASIS, type Anchor, type Frame } from './render/camera';
 import { Globe, type GlobeFrame, type SurfaceKind } from './render/globe';
 import { EarthSky } from './render/sky';
+import { lodView } from './render/lod';
 import { ThickSky, TITAN_AIR, VENUS_AIR, belowDeck, diffuseLight, tauAbove, veil, type ThickAirParams } from './render/thickair';
 import { reliefHeight, type ReliefMap, type ReliefParams } from './core/relief';
 import { discOverlap } from './render/shadow';
@@ -3057,8 +3058,17 @@ async function main() {
   const frustum = new THREE.Frustum();
   const projView = new THREE.Matrix4();
 
+  // ?perf=1 records where each frame's time goes (window.__perf), for scripts/perf.mjs.
+  const perf = params.has('perf') ? { frames: [] as Array<{ update: number; render: number; post: number; calls: number; tris: number; points: number }>, programs: 0, geometries: 0, textures: 0 } : undefined;
+  if (perf) { renderer.info.autoReset = false; Object.assign(window, { __perf: perf, __scene: scene, __renderer: renderer }); }
+  const perfPixel = new Uint8Array(4);
+  let renderStart = 0;
+  let renderEnd = 0;
+
   const frame = () => {
     const now = performance.now() / 1000;
+    const frameStart = performance.now();
+    if (perf) renderer.info.reset();
     const dt = Math.min(0.25, now - last);
     const tdbBefore = clock.tdb;
     // The rocket keeps the time itself (time on board at the time bar's rate).
@@ -3295,6 +3305,7 @@ async function main() {
     setRelativity(beta, camera);
     frustum.setFromProjectionMatrix(projView.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
     const ppr = pixelsPerRadian();
+    lodView.pixelsPerRadian = ppr;
     let daylight = 0;
     underAir = undefined;
     for (const [id, s] of surfaces) {
@@ -3525,6 +3536,7 @@ async function main() {
     // Asteroids and comets: a map layer, shown when the view is wide enough to see orbits.
     smallBodies?.update(clock.tdb / 86400, sunPos, eye, Math.max(smoothstep(2e6, 2e7, rig.distance), rig.focus >= ASTEROID_ID && rig.focus < STAR_ID ? 1 : 0));
 
+    renderStart = performance.now();
     if (holeRel && bhs.active(rig.focus, length(holeRel), ppr)) {
       // Lensing: the scene drawn into a view texture and a cube map around the camera,
       // then each pixel's ray traced back through the hole's spacetime.
@@ -3551,6 +3563,12 @@ async function main() {
       };
       cosmic.draw(renderer, scene, camera, eye, cosmicRel, frameNumber, (face, size) => setup(face, size / 2, size), () => setup(camera, ppr));
     } else renderer.render(scene, camera);
+    if (perf) {
+      // A readback waits for the GPU, so the render time includes the drawing itself.
+      const gl = renderer.getContext();
+      gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, perfPixel);
+      renderEnd = performance.now();
+    }
 
     // Labels: projected from camera-relative float64 positions. Placed in order of
     // importance; one that would overlap a label already placed is hidden.
@@ -3867,6 +3885,14 @@ async function main() {
     lastPending = pending;
     document.body.dataset.ready = 'true';
     document.body.dataset.tiles = pending === 0 && !rig.flying ? 'idle' : 'loading';
+    if (perf) {
+      const i = renderer.info;
+      perf.frames.push({ update: renderStart - frameStart, render: renderEnd - renderStart, post: performance.now() - renderEnd, calls: i.render.calls, tris: i.render.triangles, points: i.render.points });
+      if (perf.frames.length > 600) perf.frames.shift();
+      perf.programs = i.programs?.length ?? 0;
+      perf.geometries = i.memory.geometries;
+      perf.textures = i.memory.textures;
+    }
     requestAnimationFrame(frame);
   };
   requestAnimationFrame(frame);

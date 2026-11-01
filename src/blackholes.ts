@@ -203,8 +203,9 @@ export class BlackHoles {
     const rel = [camRel[0] / h.rg, camRel[1] / h.rg, camRel[2] / h.rg];
     const camBH = new THREE.Vector3(rel[0], rel[1], rel[2]).applyMatrix3(h.sceneToBH);
     const cam: Vec3 = [camBH.x, camBH.y, camBH.z];
-    if (this.view.skyStale(eye, Math.min(this.nearest, 1e30), frame)) {
-      this.view.renderSky(renderer, scene, eye, frame, prepare);
+    const stale = this.view.skyStale(eye, Math.min(this.nearest, 1e30), frame);
+    if (stale) {
+      this.view.renderSky(renderer, scene, eye, frame, prepare, stale === 'moved' ? 6 : 1);
       restore();
     }
     this.view.renderView(renderer, scene, camera);

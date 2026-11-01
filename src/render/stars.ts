@@ -4,6 +4,9 @@ import { icrfToScene } from '../core/frames';
 import { KMS_TO_PCYR, REDDENING, decodeBlock, type StarBlock, type StarIndex } from '../core/stars';
 import { RELATIVITY_GLSL, relativityUniforms } from './relativity';
 
+/** Distance (scene km) at which a star node's cone of directions is tested against the view. */
+const CONE_DISTANCE = 1e6;
+
 /** Radius of the Sun in parsecs. */
 const SUN_RADIUS_PC = 695700 / 3.0856775814913673e13;
 
@@ -104,6 +107,14 @@ void main() {
   float av = avCode * uAvStep;
   if (uDustBlend > 0.0 && flux > uCull) av = mix(av, dustBetween(uCamHigh + uCamLow, rel), uDustBlend);
   flux *= exp2(-1.3287712 * av);
+  float peak = min(flux, 1.0);
+  // Most stars in a loaded node are too faint to show from here: drop them before the
+  // colour, size and aberration work (the same test as before, done first).
+  if (peak < uCull || d < uHideWithin || length(position - uHideAt.xyz) < uHideAt.w) {
+    gl_PointSize = 0.0;
+    gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+    return;
+  }
   vec3 color = kelvinToRgb(teff * D) * exp2(-1.3287712 * av * (vec3(${REDDENING.join(', ')}) - 1.0));
   // Normalised so a star's luminance carries its V flux.
   color /= dot(color, vec3(0.2126, 0.7152, 0.0722));
@@ -116,16 +127,10 @@ void main() {
   gl_Position.z = gl_Position.w * 0.999999; // far plane
 
   float sigma = uSigma * uPixelRatio;
-  float peak = min(flux, 1.0);
   // Bright stars spread like glare in the eye or a photograph: from 3.8 magnitudes
   // below saturation they grow instead of only brightening.
   sigma *= min(pow(max(flux * 33.0, 1.0), 0.3), uMaxSigma);
   vDisc = discPx > 0.5 * uSigma * uPixelRatio ? discPx : 0.0;
-  if (peak < uCull || d < uHideWithin || length(position - uHideAt.xyz) < uHideAt.w) {
-    gl_PointSize = 0.0;
-    gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
-    return;
-  }
   vColor = color;
   vPeak = peak;
   vSigma = sigma;
@@ -187,6 +192,9 @@ export class StarField {
   private readonly packs = new Map<number, ArrayBuffer | 'loading' | 'failed'>();
   readonly blocks = new Map<number, StarBlock>();
   private needed = new Set<number>();
+  /** Update count when each drawn node was last needed (unused ones are freed). */
+  private readonly lastNeeded = new Map<number, number>();
+  private updates = 0;
   pending = 0;
 
   constructor(readonly index: StarIndex, private readonly packUrl: (pack: number) => string, pixelRatio: number, dust?: DustGrid) {
@@ -289,7 +297,48 @@ export class StarField {
       else if (pack !== 'failed' && !this.points.has(i)) this.makePoints(i, pack);
     }
     this.pending = pending;
-    for (const [i, p] of this.points) p.visible = needed.has(i);
+    // Nodes left behind (after a trip across the Galaxy) give back their GPU buffers
+    // once unneeded for about ten seconds; their packs stay loaded to rebuild quickly.
+    const now = ++this.updates;
+    const aberrating = relativityUniforms.uGamma.value > 1;
+    for (const [i, p] of this.points) {
+      p.visible = needed.has(i);
+      if (p.visible) {
+        this.lastNeeded.set(i, now);
+        this.setCone(p, nodes[i], camera, aberrating);
+      }
+      else if (now - (this.lastNeeded.get(i) ?? now) > 600) {
+        this.group.remove(p);
+        p.geometry.dispose();
+        this.points.delete(i);
+        this.blocks.delete(i);
+        this.lastNeeded.delete(i);
+      }
+    }
+  }
+
+  /**
+   * Off-screen nodes are skipped by three.js's frustum test (for every camera, the cube
+   * faces of a black hole's sky included): a node's bounding sphere is replaced by one
+   * that covers the cone of directions its stars lie in, as the shader draws them (at a
+   * direction, not a distance). A node around the camera, or any near light speed (where
+   * aberration moves the stars), is always drawn.
+   */
+  private setCone(p: THREE.Points, node: { center: number[]; half: number }, camera: Vec3, aberrating: boolean): void {
+    const rel: Vec3 = [node.center[0] - camera[0], node.center[1] - camera[1], node.center[2] - camera[2]];
+    const d = Math.hypot(rel[0], rel[1], rel[2]);
+    const r = node.half * Math.sqrt(3) + 0.2;
+    // Margin for the glow of bright stars spilling over the edge of the view.
+    const angle = d > r ? Math.asin(r / d) + 0.05 : Math.PI;
+    if (aberrating || angle > 1.2) {
+      p.frustumCulled = false;
+      return;
+    }
+    const dir = icrfToScene3([rel[0] / d, rel[1] / d, rel[2] / d]);
+    const sphere = (p.geometry.boundingSphere ??= new THREE.Sphere());
+    sphere.center.set(dir[0] * CONE_DISTANCE, dir[1] * CONE_DISTANCE, dir[2] * CONE_DISTANCE);
+    sphere.radius = CONE_DISTANCE * Math.sin(angle);
+    p.frustumCulled = true;
   }
 
   /** Nodes currently drawn. */

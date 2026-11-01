@@ -3,7 +3,7 @@ import type { Body } from '../core/bodies';
 import type { Vec3 } from '../core/ephemeris';
 import type { Mat3 } from '../core/orientation';
 import { SHADOW_GLSL } from './shadow';
-import { latLonSphere } from './sky';
+import { applySphereLod, sphereLevels } from './lod';
 
 /**
  * Planets, moons and asteroids drawn as textured triaxial ellipsoids, rotating by their
@@ -132,7 +132,8 @@ const toBody = (b: Mat3, v: Vec3): Vec3 => [
   b[2] * v[0] + b[5] * v[1] + b[8] * v[2],
 ];
 
-const sphere = latLonSphere(192, 96);
+const SEG = 192;
+const spheres = sphereLevels(SEG, SEG / 2);
 const BLANK_TAU = new THREE.DataTexture(new Float32Array([0, 0, 0, 0]), 1, 1, THREE.RGBAFormat, THREE.FloatType);
 BLANK_TAU.needsUpdate = true;
 
@@ -169,7 +170,7 @@ export class PlanetGlobe {
         uRing: { value: new THREE.Vector3() },
       },
     });
-    this.mesh = new THREE.Mesh(sphere, this.material);
+    this.mesh = new THREE.Mesh(spheres[0], this.material);
     this.mesh.scale.set(...body.radii);
     this.mesh.name = body.name;
   }
@@ -192,6 +193,7 @@ export class PlanetGlobe {
     this.quaternion.setFromRotationMatrix(this.m4);
     this.mesh.quaternion.copy(this.quaternion);
     this.mesh.position.set(f.centerRel[0], f.centerRel[1], f.centerRel[2]);
+    applySphereLod(this.mesh, spheres, SEG, Math.max(...this.body.radii), Math.hypot(f.centerRel[0], f.centerRel[1], f.centerRel[2]), 1.5);
     const u = this.material.uniforms;
     u.uSceneToBody.value.set(b[0], b[3], b[6], b[1], b[4], b[7], b[2], b[5], b[8]);
     const sun = toBody(b, f.sunRel);
