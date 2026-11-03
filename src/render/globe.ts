@@ -7,6 +7,7 @@ import { tileBounds, tileSize, type HeightTile, type TileRef, type TileStore } f
 import { ATMOSPHERE, MARS_ATMOSPHERE, atmosphereGlsl, type AtmosphereParams } from './atmosphere';
 import { thickAirGlsl, type ThickAirParams } from './thickair';
 import { CLOUD_GLSL } from './clouds';
+import { computeHorizons, HORIZON_DIRECTIONS, HORIZON_MAX_DEG, HORIZON_MIN_DEG } from '../core/horizon';
 
 const DEG = Math.PI / 180;
 const GRID = 65;
@@ -65,6 +66,10 @@ interface TextureHandle {
 const vertexShader = /* glsl */ `
 attribute float water;
 attribute vec2 detail;
+attribute vec4 horizonA;
+attribute vec4 horizonB;
+varying vec4 vHorizonA;
+varying vec4 vHorizonB;
 varying vec2 vUv;
 varying vec2 vDetail;
 varying vec3 vNormal;
@@ -77,6 +82,8 @@ void main() {
   vNormal = normal;
   vWater = water;
   vDetail = detail;
+  vHorizonA = horizonA;
+  vHorizonB = horizonB;
   vRel = (modelMatrix * vec4(position, 1.0)).xyz; // camera-relative, scene axes
   gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
   #include <logdepthbuf_vertex>
@@ -129,6 +136,45 @@ vec3 surfaceDetail(vec3 n, float dist, out float shade) {
 
 vec3 srgbToLinear(vec3 c) { return pow(c, vec3(2.2)); }
 
+// Terrain shadows from the tile's horizon map (core/horizon.ts): the horizon's elevation
+// in the Sun's direction, interpolated between the eight stored directions, against the
+// Sun's elevation. The Sun's disc (and the map's interpolation) make the edge soft.
+varying vec4 vHorizonA;
+varying vec4 vHorizonB;
+uniform float uSunRadius;
+float horizonAngle(float v) { return radians(${HORIZON_MIN_DEG.toFixed(1)} + v * ${(HORIZON_MAX_DEG - HORIZON_MIN_DEG).toFixed(1)}); }
+float horizonIn(int k) {
+  if (k == 0) return vHorizonA.x;
+  if (k == 1) return vHorizonA.y;
+  if (k == 2) return vHorizonA.z;
+  if (k == 3) return vHorizonA.w;
+  if (k == 4) return vHorizonB.x;
+  if (k == 5) return vHorizonB.y;
+  if (k == 6) return vHorizonB.z;
+  return vHorizonB.w;
+}
+// Fraction of the Sun's disc above the terrain's horizon at body-frame point p.
+float terrainSunlight(vec3 p) {
+  vec3 up = normalize(p);
+  vec3 east = normalize(vec3(-up.y, up.x, 0.0) + vec3(1e-6, 0.0, 0.0));
+  vec3 north = cross(up, east);
+  float el = asin(clamp(dot(up, uSun), -1.0, 1.0));
+  float az = atan(dot(uSun, east), dot(uSun, north));
+  if (az < 0.0) az += 2.0 * PI;
+  float f = az / (PI / 4.0);
+  int k = int(floor(f));
+  float t = f - float(k);
+  float hor = horizonAngle(mix(horizonIn(k), horizonIn(k == 7 ? 0 : k + 1), t));
+  float w = uSunRadius + 0.006;
+  return smoothstep(-w, w, el - hor);
+}
+// The share of the sky's dome left open by the terrain around (1 on open ground).
+float terrainSkyView() {
+  vec4 a = sin(max(vec4(horizonAngle(vHorizonA.x), horizonAngle(vHorizonA.y), horizonAngle(vHorizonA.z), horizonAngle(vHorizonA.w)), 0.0));
+  vec4 b = sin(max(vec4(horizonAngle(vHorizonB.x), horizonAngle(vHorizonB.y), horizonAngle(vHorizonB.z), horizonAngle(vHorizonB.w)), 0.0));
+  return 1.0 - (dot(a, a) + dot(b, b)) / 8.0;
+}
+
 ${CLOUD_GLSL}
 // The cloud deck between a point on the ground and the Sun: how much of the direct beam
 // gets through, and how much of the sunlight arrives diffused by the cloud instead.
@@ -165,8 +211,8 @@ void main() {
   float mu0 = max(ndl, 0.0);
   float mu = max(dot(n, -viewDir), 0.0);
   float ls = 2.0 * mu0 / (mu0 + mu + 1e-4);
-  vec3 color = albedo * sunT * mix(mu0, ls * 0.5, 0.3);
-  color += albedo * vec3(0.16, 0.11, 0.075) * smoothstep(-0.2, 0.5, sunUp) * (0.6 + 0.4 * dot(n, up));
+  vec3 color = albedo * sunT * mix(mu0, ls * 0.5, 0.3) * terrainSunlight(uCamBody + rel);
+  color += albedo * vec3(0.16, 0.11, 0.075) * smoothstep(-0.2, 0.5, sunUp) * (0.6 + 0.4 * dot(n, up)) * terrainSkyView();
 #else
   // Rough rock and soil (Oren-Nayar, slope spread 0.4 rad): flatter than Lambert, with
   // some light thrown back toward the Sun, so sunlit slopes do not look like plastic.
@@ -181,14 +227,16 @@ void main() {
   // The direct beam and, under a cloud, the part of it the cloud lets through diffusely.
   float tDirect = 1.0, tDiffuse = 0.0;
   cloudShadow(p, up, max(sunUp, 0.0), tDirect, tDiffuse);
-  float skyView = 0.5 + 0.5 * dot(n, up);
+  float skyView = (0.5 + 0.5 * dot(n, up)) * terrainSkyView();
+  tDirect *= terrainSunlight(uCamBody + rel);
   vec3 color = albedo * sunT * (rough * tDirect + max(sunUp, 0.0) * tDiffuse * skyView);
   // Skylight from the part of the sky the slope faces, blue, fading through twilight
   // (about a seventh of the light on the ground with the Sun high in a clear sky).
   color += albedo * vec3(0.06, 0.085, 0.13) * skyView * smoothstep(-0.15, 0.4, sunUp) * mix(1.0, 1.6, 1.0 - tDirect);
   // Light thrown back by the sunlit ground around, onto slopes that face it: canyon
   // walls in shadow are lit warm by the opposite walls, not left blue-black.
-  color += albedo * albedo * sunT * max(sunUp, 0.0) * tDirect * (1.0 - skyView) * 1.4;
+  // (Lit walls across a valley keep lighting it when this point is in their shadow.)
+  color += albedo * albedo * sunT * max(sunUp, 0.0) * (1.0 - skyView) * 1.4;
 #endif
   color *= eclipse;
   if (vWater > 0.5) {
@@ -215,7 +263,7 @@ void main() {
   float mu0 = dot(up, uSun);
   vec3 diffuse = taDiffuse(h, mu0);
   vec3 direct = taDirect(h, mu0);
-  vec3 color = albedo * (diffuse * (0.55 + 0.45 * dot(n, up)) + direct * max(ndl, 0.0));
+  vec3 color = albedo * (diffuse * (0.55 + 0.45 * dot(n, up)) * terrainSkyView() + direct * max(ndl, 0.0) * terrainSunlight(p));
   if (vWater > 0.5) {
     // Liquid methane and ethane: dark, a mirror for the sky and the dim Sun.
     float fresnel = 0.02 + 0.98 * pow(1.0 - max(dot(n, -viewDir), 0.0), 5.0);
@@ -236,7 +284,7 @@ void main() {
   // normal albedo is about 0.12, so scale it back.
   // In Earth's umbra the Moon is lit only by sunlight refracted through Earth's
   // atmosphere, reddened by the same scattering that makes sunsets red (uEclTint).
-  vec3 color = albedo * mix(mu0, ls * 0.5, 0.7) * uSunIntensity * (eclipse + (1.0 - eclipse) * uEclTint);
+  vec3 color = albedo * mix(mu0, ls * 0.5, 0.7) * uSunIntensity * (eclipse + (1.0 - eclipse) * uEclTint) * terrainSunlight(uCamBody + rel);
 #endif
   gl_FragColor = vec4(color, 1.0);
   #include <tonemapping_fragment>
@@ -274,6 +322,8 @@ export class Globe {
     // Earth's cloud cover (set by EarthSky), for cloud shadows on the ground.
     uClouds: { value: blankTexture() as THREE.Texture },
     uHasClouds: { value: 0 },
+    /** Angular radius of the Sun's disc seen from the body (radians), for soft terrain shadows. */
+    uSunRadius: { value: 0.00465 },
   };
   private blankNight = new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1);
   pending = 0;
@@ -359,6 +409,34 @@ export class Globe {
     const a = h[y0 * GRID + x0], b = h[y0 * GRID + x0 + 1], c = h[(y0 + 1) * GRID + x0], d = h[(y0 + 1) * GRID + x0 + 1];
     // Each grid square is split along its b-c diagonal (see buildTileGeometry).
     return tx + ty <= 1 ? a + (b - a) * tx + (c - a) * ty : d + (c - d) * (1 - tx) + (b - d) * (1 - ty);
+  }
+
+  /**
+   * The tile's horizon map (core/horizon.ts) as two byte vec4 attributes: directions
+   * N, NE, E, SE and S, SW, W, NW. Skirt vertices copy their edge vertex.
+   */
+  private horizons(node: Node, geometry: TileGeometry): [Uint8Array, Uint8Array] {
+    const [w, s, e, n] = tileBounds(node.level, node.x, node.y);
+    const map = computeHorizons(geometry.heights, GRID, [w, s, e, n], this.shape.a, (lon, lat) => this.heightAt(lon * DEG, lat * DEG, true));
+    const count = GRID * GRID;
+    const total = geometry.positions.length / 3;
+    const a = new Uint8Array(total * 4);
+    const b = new Uint8Array(total * 4);
+    const copy = (dst: number, src: number) => {
+      for (let k = 0; k < 4; k++) {
+        a[dst * 4 + k] = map[src * HORIZON_DIRECTIONS + k];
+        b[dst * 4 + k] = map[src * HORIZON_DIRECTIONS + 4 + k];
+      }
+    };
+    for (let k = 0; k < count; k++) copy(k, k);
+    // Skirts follow the edges in buildTileGeometry's order: north, south, west, east.
+    for (let i = 0; i < GRID; i++) {
+      copy(count + i, i);
+      copy(count + GRID + i, (GRID - 1) * GRID + i);
+      copy(count + 2 * GRID + i, i * GRID);
+      copy(count + 3 * GRID + i, i * GRID + GRID - 1);
+    }
+    return [a, b];
   }
 
   private makeNode(level: number, x: number, y: number): Node {
@@ -480,6 +558,9 @@ export class Globe {
     g.setAttribute('uv', new THREE.BufferAttribute(geometry.uvs, 2));
     g.setAttribute('water', new THREE.BufferAttribute(geometry.water, 1));
     g.setAttribute('detail', new THREE.BufferAttribute(geometry.detail, 2));
+    const [horizonA, horizonB] = this.horizons(node, geometry);
+    g.setAttribute('horizonA', new THREE.BufferAttribute(horizonA, 4, true));
+    g.setAttribute('horizonB', new THREE.BufferAttribute(horizonB, 4, true));
     g.setIndex(new THREE.BufferAttribute(geometry.indices, 1));
     g.boundingSphere = new THREE.Sphere(new THREE.Vector3(), geometry.radius);
 
